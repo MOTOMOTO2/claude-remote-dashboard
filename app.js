@@ -8,7 +8,18 @@ if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
   throw new Error('missing config');
 }
 
-const sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+// Explicit about session persistence: the token is kept in localStorage and
+// refreshed in the background, so you sign in once per device and stay in.
+// (On iOS, a home-screen install has its own storage — signing in inside
+// Safari does not carry over, so the first sign-in must happen in the app.)
+const sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    storageKey: 'claude-remote-auth',
+  },
+});
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -43,14 +54,18 @@ function jobCard(job, { live }) {
 
   const meta = live
     ? elapsed(job.claimed_at ?? job.created_at)
-    : [money(job.cost_usd), ago(job.created_at)].filter(Boolean).join(' · ');
+    : [job.num_turns ? `${job.num_turns} turns` : '', ago(job.created_at)].filter(Boolean).join(' · ');
+
+  // Kept as a tooltip: on a subscription this is an estimate of what the work
+  // would have cost on the API, not something you were charged.
+  const costHint = job.cost_usd ? ` title="≈${money(job.cost_usd)} of API-equivalent usage"` : '';
 
   return `
     <article class="job" data-job="${job.id}">
       <div class="job-head">
         <span class="job-title">${esc(job.project_slug ?? 'naming…')}</span>
         <span class="job-status ${job.status}"><i class="dot"></i>${job.status}</span>
-        <span class="job-meta" data-elapsed="${live ? job.claimed_at ?? job.created_at : ''}">${esc(meta)}</span>
+        <span class="job-meta"${costHint} data-elapsed="${live ? job.claimed_at ?? job.created_at : ''}">${esc(meta)}</span>
       </div>
       <p class="job-prompt">${esc(job.prompt)}</p>
       ${live && last ? `<p class="job-now">${esc(last.text)}</p>` : ''}
@@ -171,6 +186,36 @@ async function pollHost() {
   badge.title = fresh
     ? 'Desktop is online — jobs run now'
     : 'Desktop is offline — jobs will queue until it boots';
+
+  renderUsage(host);
+}
+
+const WINDOW_LABEL = {
+  five_hour: '5-hour window',
+  seven_day: '7-day window',
+  seven_day_opus: '7-day Opus window',
+  seven_day_sonnet: '7-day Sonnet window',
+  overage: 'overage',
+};
+
+/** Only known after a job has run — the reading comes from the agent's own stream. */
+function renderUsage(host) {
+  const box = $('usage');
+  if (!host || host.usage_pct == null) { box.hidden = true; return; }
+
+  const pct = Number(host.usage_pct);
+  box.hidden = false;
+  box.classList.toggle('warn', pct >= 60 && pct < 85);
+  box.classList.toggle('full', pct >= 85);
+
+  $('usage-label').textContent = WINDOW_LABEL[host.usage_window] ?? 'usage window';
+  $('usage-pct').textContent = `${pct.toFixed(0)}% used`;
+  $('usage-fill').style.width = `${Math.min(100, pct)}%`;
+
+  const resets = host.usage_resets_at ? new Date(host.usage_resets_at) : null;
+  $('usage-reset').textContent = resets && resets > new Date()
+    ? `resets ${resets.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : '';
 }
 
 /** Offer past projects when the mode is "existing". */
@@ -218,7 +263,7 @@ $('new-job').addEventListener('submit', async (e) => {
     project_slug: mode === 'existing' ? $('project-slug').value : null,
     repo_visibility: mode === 'existing' ? 'none' : $('visibility').value,
     effort: $('effort').value,
-    budget_usd: Number($('budget').value),
+    usage_cap_pct: Number($('usage-cap').value),
   });
 
   if (error) {

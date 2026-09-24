@@ -135,6 +135,40 @@ select {
   border-radius: 8px;
 }
 
+/* ── usage meter ────────────────────────────────────────── */
+.usage {
+  padding: .625rem .75rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.usage-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--muted); margin-bottom: .4rem;
+}
+
+.usage-pct { font-variant-numeric: tabular-nums; font-weight: 560; color: var(--text); }
+.usage.warn .usage-pct { color: var(--run); }
+.usage.full .usage-pct { color: var(--err); }
+
+.usage-bar {
+  height: 5px; border-radius: 3px;
+  background: var(--surface-2); overflow: hidden;
+}
+
+.usage-bar > i {
+  display: block; height: 100%; width: 0;
+  background: var(--ok);
+  border-radius: 3px;
+  transition: width .4s ease, background-color .4s ease;
+}
+
+.usage.warn .usage-bar > i { background: var(--run); }
+.usage.full .usage-bar > i { background: var(--err); }
+
+.usage p { margin: .4rem 0 0; }
+
 .hint { margin: -.25rem 0 0; line-height: 1.45; }
 .hint strong { color: var(--text); font-weight: 560; }
 
