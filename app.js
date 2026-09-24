@@ -219,7 +219,7 @@ async function pollUsage() {
   const rows = data
     .filter((r) => r.pct != null)
     .sort((a, b) => {
-      const ai = WINDOW_ORDER.indexOf(a.window), bi = WINDOW_ORDER.indexOf(b.window);
+      const ai = WINDOW_ORDER.indexOf(a.window_type), bi = WINDOW_ORDER.indexOf(b.window_type);
       return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
     });
 
@@ -232,7 +232,7 @@ async function pollUsage() {
     return `
       <div class="usage-row ${tone}">
         <div class="usage-head">
-          <span>${esc(WINDOW_LABEL[r.window] ?? r.window)}</span>
+          <span>${esc(WINDOW_LABEL[r.window_type] ?? r.window_type)}</span>
           <span class="usage-pct">${pct.toFixed(0)}%</span>
         </div>
         <div class="usage-bar"><i style="width:${Math.min(100, pct)}%"></i></div>
