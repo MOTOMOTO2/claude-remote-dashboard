@@ -1,6 +1,6 @@
-// Caches only the app shell, so the dashboard opens instantly and survives a
-// flaky connection. Supabase traffic is never cached — it must always be live.
-const SHELL = 'claude-remote-v2';
+﻿// Caches only the app shell, so the dashboard opens instantly and survives a
+// flaky connection. Supabase traffic is never cached â€” it must always be live.
+const SHELL = 'claude-remote-v3';
 const FILES = ['.', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icon.png'];
 
 self.addEventListener('install', (e) => {
