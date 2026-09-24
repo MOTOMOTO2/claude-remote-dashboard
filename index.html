@@ -66,7 +66,7 @@
           </select>
         </label>
 
-        <label class="field">
+        <label class="field" title="How hard Claude thinks. Higher is more thorough and costs more.">
           <span>effort</span>
           <select id="effort">
             <option value="medium">medium</option>
@@ -76,8 +76,8 @@
           </select>
         </label>
 
-        <label class="field">
-          <span>cap</span>
+        <label class="field" title="Most this one job may spend before it stops itself. Not a charge — just a ceiling.">
+          <span>max spend</span>
           <select id="budget">
             <option value="2">$2</option>
             <option value="5" selected>$5</option>
@@ -86,6 +86,11 @@
           </select>
         </label>
       </div>
+
+      <p class="muted small hint">
+        <strong>max spend</strong> is a safety ceiling, not a price. A job stops
+        itself if it gets there. Most small projects land well under $1.
+      </p>
 
       <button type="submit" class="primary" id="send">Send to desktop</button>
       <p id="compose-note" class="muted small" hidden></p>

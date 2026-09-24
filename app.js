@@ -179,7 +179,9 @@ function refreshProjectList() {
   const sel = $('project-slug');
   if (sel.dataset.slugs === slugs.join()) return;
   sel.dataset.slugs = slugs.join();
-  sel.innerHTML = slugs.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  sel.innerHTML = slugs.length
+    ? slugs.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')
+    : '<option value="" disabled selected>none yet — build one with “new”</option>';
 }
 
 // ─────────────────────────────────────────────── actions

@@ -35,6 +35,10 @@
 
 * { box-sizing: border-box; }
 
+/* `[hidden]` is only a UA-stylesheet rule, so any author `display` beats it.
+   Several things here are grids, so without this they never actually hide. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   padding: env(safe-area-inset-top, 0) 0 calc(env(safe-area-inset-bottom, 0) + 2rem);
@@ -130,6 +134,9 @@ select {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+
+.hint { margin: -.25rem 0 0; line-height: 1.45; }
+.hint strong { color: var(--text); font-weight: 560; }
 
 button {
   padding: .625rem 1rem;
