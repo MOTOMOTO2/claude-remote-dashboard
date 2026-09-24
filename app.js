@@ -97,6 +97,13 @@ $('new-project').addEventListener('click', () => go('#/new'));
 $('home-new').addEventListener('click', () => go('#/new'));
 
 /**
+ * A chat whose project the host no longer sees anywhere — repo deleted on
+ * GitHub and no folder left on the PC. Its history is still readable, but
+ * there is nothing left to work on, so it is flagged rather than offered.
+ */
+const projectGone = (slug) => projects.length > 0 && !projects.some((p) => p.name === slug);
+
+/**
  * Projects that have actually been worked on read as chats, with their latest
  * message as a preview. Repos with no history sit below as things you could
  * start a chat on — the host clones them on first use.
@@ -133,7 +140,9 @@ function renderDrawer() {
           j.prompt,
           isActive(j)
             ? `<span class="di-badge ${j.status}">${j.status}</span>`
-            : `<span class="di-when">${ago(j.created_at)}</span>`,
+            : projectGone(slug)
+              ? '<span class="di-badge gone">gone</span>'
+              : `<span class="di-when">${ago(j.created_at)}</span>`,
         )).join('')
       : '') +
     (untouched.length
@@ -251,15 +260,24 @@ function renderThread() {
     scrolls.set(el.dataset.log, atBottom ? null : el.scrollTop);
   }
 
-  $('thread').innerHTML = mine.length
+  const gone = projectGone(route.slug) ? `
+    <div class="notice">
+      <strong>${esc(route.slug)}</strong> isn’t on GitHub or your desktop any more.
+      The history below is still here, but there’s nothing left to build on.
+    </div>` : '';
+
+  $('thread').innerHTML = gone + (mine.length
     ? mine.map((job) => `
         <div class="turn">
           <div class="msg you">${esc(job.prompt)}</div>
           ${replyHtml(job)}
         </div>`).join('')
+      + `<button class="ghost delete-chat" data-delete-chat="${esc(route.slug)}">
+           Delete this chat
+         </button>`
     : `<p class="muted centered-note">Nothing here yet. Send a message to start
          working on <strong>${esc(route.slug)}</strong> — it gets cloned to your
-         desktop on first use.</p>`;
+         desktop on first use.</p>`);
 
   for (const el of document.querySelectorAll('[data-log]')) {
     const prev = scrolls.get(el.dataset.log);
@@ -545,6 +563,26 @@ document.addEventListener('click', async (e) => {
   e.target.disabled = true;
   const { error } = await sb.from('jobs').update({ cancel_requested: true }).eq('id', id);
   if (error) console.error(error);
+});
+
+document.addEventListener('click', async (e) => {
+  const slug = e.target.dataset?.deleteChat;
+  if (!slug) return;
+
+  // Say plainly what this does and does not remove.
+  const ok = confirm(
+    `Delete the chat history for "${slug}"?\n\n` +
+    'This removes the messages and logs from the dashboard.\n' +
+    'It does NOT delete the GitHub repo or the folder on your PC.',
+  );
+  if (!ok) return;
+
+  e.target.disabled = true;
+  const { error } = await sb.from('jobs').delete().eq('project_slug', slug);
+  if (error) { console.error(error); e.target.disabled = false; return; }
+
+  for (const [id, j] of jobs) if (j.project_slug === slug) jobs.delete(id);
+  go('#/');
 });
 
 $('auth-form').addEventListener('submit', async (e) => {
