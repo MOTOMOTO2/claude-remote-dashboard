@@ -104,7 +104,6 @@ function render() {
     const prev = scrolls.get(el.dataset.log);
     el.scrollTop = prev == null ? el.scrollHeight : prev;
   }
-  refreshProjectList();
 }
 
 /** Append one line without rebuilding the card, so the log doesn't flicker. */
@@ -186,47 +185,85 @@ async function pollHost() {
   badge.title = fresh
     ? 'Desktop is online — jobs run now'
     : 'Desktop is offline — jobs will queue until it boots';
-
-  renderUsage(host);
 }
 
 const WINDOW_LABEL = {
-  five_hour: '5-hour window',
-  seven_day: '7-day window',
-  seven_day_opus: '7-day Opus window',
-  seven_day_sonnet: '7-day Sonnet window',
+  five_hour: 'session · 5 hours',
+  seven_day: 'week · 7 days',
+  seven_day_opus: 'week · Opus',
+  seven_day_sonnet: 'week · Sonnet',
+  seven_day_overage_included: 'week · incl. overage',
   overage: 'overage',
 };
 
-/** Only known after a job has run — the reading comes from the agent's own stream. */
-function renderUsage(host) {
-  const box = $('usage');
-  if (!host || host.usage_pct == null) { box.hidden = true; return; }
+// Session and week first; anything else the SDK reports follows.
+const WINDOW_ORDER = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
 
-  const pct = Number(host.usage_pct);
-  box.hidden = false;
-  box.classList.toggle('warn', pct >= 60 && pct < 85);
-  box.classList.toggle('full', pct >= 85);
-
-  $('usage-label').textContent = WINDOW_LABEL[host.usage_window] ?? 'usage window';
-  $('usage-pct').textContent = `${pct.toFixed(0)}% used`;
-  $('usage-fill').style.width = `${Math.min(100, pct)}%`;
-
-  const resets = host.usage_resets_at ? new Date(host.usage_resets_at) : null;
-  $('usage-reset').textContent = resets && resets > new Date()
-    ? `resets ${resets.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-    : '';
+function resetLabel(iso) {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (at <= new Date()) return '';
+  const hrs = (at - Date.now()) / 36e5;
+  const when = hrs < 24
+    ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : at.toLocaleDateString([], { weekday: 'short', hour: 'numeric' });
+  return `resets ${when}`;
 }
 
-/** Offer past projects when the mode is "existing". */
-function refreshProjectList() {
-  const slugs = [...new Set([...jobs.values()].map((j) => j.project_slug).filter(Boolean))];
+/** Only known after a job has run — readings come from the agent's own stream. */
+async function pollUsage() {
+  const box = $('usage');
+  const { data, error } = await sb.from('usage_windows').select('*');
+  if (error || !data?.length) { box.hidden = true; return; }
+
+  const rows = data
+    .filter((r) => r.pct != null)
+    .sort((a, b) => {
+      const ai = WINDOW_ORDER.indexOf(a.window), bi = WINDOW_ORDER.indexOf(b.window);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+
+  if (!rows.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  box.innerHTML = rows.map((r) => {
+    const pct = Number(r.pct);
+    const tone = pct >= 85 ? 'full' : pct >= 60 ? 'warn' : '';
+    return `
+      <div class="usage-row ${tone}">
+        <div class="usage-head">
+          <span>${esc(WINDOW_LABEL[r.window] ?? r.window)}</span>
+          <span class="usage-pct">${pct.toFixed(0)}%</span>
+        </div>
+        <div class="usage-bar"><i style="width:${Math.min(100, pct)}%"></i></div>
+        <p class="muted small">${esc(resetLabel(r.resets_at))}&nbsp;</p>
+      </div>`;
+  }).join('');
+}
+
+/**
+ * Every GitHub repo on the account, plus anything already in the workspace.
+ * Repos that aren't local yet are offered too — the host clones them on
+ * first use — but the local ones come first because they start instantly.
+ */
+async function loadProjects() {
   const sel = $('project-slug');
-  if (sel.dataset.slugs === slugs.join()) return;
-  sel.dataset.slugs = slugs.join();
-  sel.innerHTML = slugs.length
-    ? slugs.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')
-    : '<option value="" disabled selected>none yet — build one with “new”</option>';
+  const { data, error } = await sb.from('projects')
+    .select('name,full_name,is_local,private,pushed_at')
+    .order('pushed_at', { ascending: false, nullsFirst: false });
+
+  if (error || !data?.length) {
+    sel.innerHTML = '<option value="" disabled selected>none found — is the desktop online?</option>';
+    return;
+  }
+
+  const local = data.filter((p) => p.is_local);
+  const remote = data.filter((p) => !p.is_local);
+  const opt = (p) => `<option value="${esc(p.name)}">${esc(p.name)}${p.private ? '' : ' ·  public'}</option>`;
+
+  sel.innerHTML =
+    (local.length ? `<optgroup label="on your desktop">${local.map(opt).join('')}</optgroup>` : '') +
+    (remote.length ? `<optgroup label="GitHub — cloned on first use">${remote.map(opt).join('')}</optgroup>` : '');
 }
 
 // ─────────────────────────────────────────────── actions
@@ -305,8 +342,26 @@ $('sign-out').addEventListener('click', () => sb.auth.signOut());
 
 let hostTimer = null;
 
-sb.auth.onAuthStateChange(async (_evt, session) => {
+/**
+ * If storage is blocked, Supabase writes the session and it silently vanishes,
+ * so every launch looks like a fresh sign-in with no error anywhere. Test it
+ * directly and say so, rather than letting it look like a broken login.
+ */
+function storageWorks() {
+  try {
+    const k = '__cr_probe__';
+    localStorage.setItem(k, '1');
+    const ok = localStorage.getItem(k) === '1';
+    localStorage.removeItem(k);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function applySession(session) {
   const signedIn = Boolean(session);
+  $('booting').hidden = true;
   $('app').hidden = !signedIn;
   $('auth').hidden = signedIn;
 
@@ -314,17 +369,30 @@ sb.auth.onAuthStateChange(async (_evt, session) => {
   channels = [];
   clearInterval(hostTimer);
 
-  if (signedIn) {
-    await loadJobs();
-    subscribe();
-    pollHost();
-    hostTimer = setInterval(pollHost, 10_000);
+  if (!signedIn) {
+    $('storage-warning').hidden = storageWorks();
+    return;
   }
-});
+
+  await Promise.all([loadJobs(), loadProjects(), pollUsage()]);
+  subscribe();
+  pollHost();
+  hostTimer = setInterval(() => { pollHost(); pollUsage(); }, 10_000);
+}
+
+// Restore explicitly before deciding what to show, so a stored session never
+// flashes the sign-in form on the way in.
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  await applySession(session);
+  sb.auth.onAuthStateChange((_evt, s) => applySession(s));
+})();
 
 // Realtime drops on mobile when the tab sleeps; resync on return.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !$('app').hidden) { loadJobs(); pollHost(); }
+  if (document.visibilityState === 'visible' && !$('app').hidden) {
+    loadJobs(); pollHost(); pollUsage(); loadProjects();
+  }
 });
 
 if ('serviceWorker' in navigator) {

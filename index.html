@@ -13,6 +13,11 @@
 </head>
 <body>
 
+<!-- ─────────────────────────────────────────── restoring session -->
+<section id="booting" class="auth">
+  <p class="muted">restoring session…</p>
+</section>
+
 <!-- ─────────────────────────────────────────── sign in -->
 <section id="auth" class="auth" hidden>
   <form id="auth-form" class="card auth-card">
@@ -22,6 +27,12 @@
     <input id="password" type="password" placeholder="password" autocomplete="current-password" required>
     <button type="submit" class="primary">Sign in</button>
     <p id="auth-error" class="error" hidden></p>
+    <p id="storage-warning" class="error" hidden>
+      This browser is blocking site storage, so your sign-in can’t be
+      remembered. If you’re in a Private tab, open it normally. On iOS, add the
+      page to your Home Screen and sign in <em>inside that app</em> — a
+      home-screen app has its own separate storage from Safari.
+    </p>
   </form>
 </section>
 
@@ -88,14 +99,7 @@
         </label>
       </div>
 
-      <div id="usage" class="usage" hidden>
-        <div class="usage-head">
-          <span id="usage-label">5-hour window</span>
-          <span id="usage-pct" class="usage-pct">—</span>
-        </div>
-        <div class="usage-bar"><i id="usage-fill"></i></div>
-        <p id="usage-reset" class="muted small"></p>
-      </div>
+      <div id="usage" class="usage" hidden></div>
 
       <p class="muted small hint">
         <strong>usage cap</strong> stops the job if your 5-hour window gets that
