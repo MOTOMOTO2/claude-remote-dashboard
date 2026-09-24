@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#11110f">
+<title>claude-remote</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ─────────────────────────────────────────── sign in -->
+<section id="auth" class="auth" hidden>
+  <form id="auth-form" class="card auth-card">
+    <h1>claude&#8209;remote</h1>
+    <p class="muted">Sign in to reach your desktop.</p>
+    <input id="email" type="email" placeholder="email" autocomplete="username" required>
+    <input id="password" type="password" placeholder="password" autocomplete="current-password" required>
+    <button type="submit" class="primary">Sign in</button>
+    <p id="auth-error" class="error" hidden></p>
+  </form>
+</section>
+
+<!-- ─────────────────────────────────────────── app -->
+<div id="app" hidden>
+
+  <header>
+    <span class="wordmark">claude&#8209;remote</span>
+    <span id="host-badge" class="badge" title="desktop status">
+      <i class="dot"></i><span id="host-name">checking…</span>
+    </span>
+    <button id="sign-out" class="ghost" title="Sign out">&#x23fb;</button>
+  </header>
+
+  <main>
+
+    <!-- new job -->
+    <form id="new-job" class="card compose">
+      <textarea id="prompt" rows="3" required
+        placeholder="create a simple mario game&#10;fix the null deref in api/users.ts"></textarea>
+
+      <div class="controls">
+        <label class="field">
+          <span>project</span>
+          <select id="mode">
+            <option value="new">new</option>
+            <option value="existing">existing</option>
+          </select>
+        </label>
+
+        <label class="field" id="slug-field" hidden>
+          <span>which</span>
+          <select id="project-slug"></select>
+        </label>
+
+        <label class="field" id="visibility-field">
+          <span>repo</span>
+          <select id="visibility">
+            <option value="private">private</option>
+            <option value="public">public</option>
+            <option value="none">local only</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>effort</span>
+          <select id="effort">
+            <option value="medium">medium</option>
+            <option value="high" selected>high</option>
+            <option value="xhigh">xhigh</option>
+            <option value="max">max</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>cap</span>
+          <select id="budget">
+            <option value="2">$2</option>
+            <option value="5" selected>$5</option>
+            <option value="10">$10</option>
+            <option value="25">$25</option>
+          </select>
+        </label>
+      </div>
+
+      <button type="submit" class="primary" id="send">Send to desktop</button>
+      <p id="compose-note" class="muted small" hidden></p>
+    </form>
+
+    <!-- active -->
+    <section id="active-section" hidden>
+      <h2>Running</h2>
+      <div id="active"></div>
+    </section>
+
+    <!-- history -->
+    <section>
+      <h2>History</h2>
+      <div id="history"></div>
+      <p id="history-empty" class="muted small" hidden>No jobs yet.</p>
+    </section>
+
+  </main>
+</div>
+
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
