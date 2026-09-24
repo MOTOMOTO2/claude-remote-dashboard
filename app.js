@@ -31,7 +31,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g,
 let projects = [];
 let usage = [];
 let channels = [];
-let route = { view: 'new' };
+let route = { view: 'home' };
 
 const ACTIVE = new Set(['queued', 'running', 'paused']);
 const isActive = (j) => ACTIVE.has(j.status);
@@ -60,7 +60,8 @@ function readHash() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h.startsWith('p/')) return { view: 'project', slug: decodeURIComponent(h.slice(2)) };
   if (h.startsWith('j/')) return { view: 'pending', jobId: h.slice(2) };
-  return { view: 'new' };
+  if (h === 'new') return { view: 'new' };
+  return { view: 'home' };
 }
 
 const go = (hash) => { location.hash = hash; };
@@ -93,6 +94,7 @@ $('menu-open').addEventListener('click', openDrawer);
 $('menu-close').addEventListener('click', closeDrawer);
 $('scrim').addEventListener('click', closeDrawer);
 $('new-project').addEventListener('click', () => go('#/new'));
+$('home-new').addEventListener('click', () => go('#/new'));
 
 /**
  * Projects that have actually been worked on read as chats, with their latest
@@ -185,7 +187,7 @@ function usageHtml() {
 
 function renderUsage() {
   const html = usageHtml();
-  for (const id of ['usage-new', 'usage-drawer']) {
+  for (const id of ['usage-home', 'usage-new', 'usage-drawer']) {
     $(id).innerHTML = html;
     $(id).hidden = !html;
   }
@@ -296,18 +298,97 @@ setInterval(() => {
   }
 }, 1000);
 
+// ─────────────────────────────────────────────── home
+
+const STATUS_WORD = { running: 'running', paused: 'paused', queued: 'queued' };
+
+/**
+ * The landing view: what is happening right now, what it is costing you, and
+ * what needs attention. One hero figure, then stat tiles - a single count does
+ * not earn a chart.
+ */
+function renderHome() {
+  const all = [...jobs.values()];
+  const active = all.filter(isActive)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  const running = active.filter((j) => j.status === 'running');
+  const paused  = active.filter((j) => j.status === 'paused');
+  const queued  = active.filter((j) => j.status === 'queued');
+
+  // Hero: the number the page leads with. Exactly one per view.
+  $('hero-value').textContent = String(running.length);
+  $('hero-label').textContent = running.length === 1 ? 'agent running' : 'agents running';
+  $('hero-sub').textContent = [
+    paused.length ? `${paused.length} paused for usage` : '',
+    queued.length ? `${queued.length} waiting` : '',
+    !active.length ? 'Nothing in progress.' : '',
+  ].filter(Boolean).join(' · ');
+
+  // Active list: which projects, and what each is doing this second.
+  $('active-block').hidden = active.length === 0;
+  $('active-list').innerHTML = active.map((job) => {
+    const log = events.get(job.id) ?? [];
+    const last = [...log].reverse().find((e) => e.kind === 'tool' || e.kind === 'status');
+    const when = job.status === 'paused'
+      ? (job.resume_at ? `resumes ${clock(job.resume_at)}` : 'waiting')
+      : job.status === 'queued'
+        ? 'waiting for desktop'
+        : `<span data-elapsed="${job.claimed_at ?? job.created_at}">${elapsed(job.claimed_at ?? job.created_at)}</span>`;
+
+    return `
+      <a class="row" href="#/p/${encodeURIComponent(job.project_slug ?? '')}">
+        <span class="row-top">
+          <span class="row-name">${esc(job.project_slug ?? 'naming…')}</span>
+          <span class="row-state ${job.status}"><i class="dot"></i>${STATUS_WORD[job.status] ?? job.status}</span>
+          <span class="row-when">${when}</span>
+        </span>
+        <span class="row-sub">${esc(job.status === 'running' && last ? last.text : job.prompt)}</span>
+      </a>`;
+  }).join('');
+
+  // Stat tiles.
+  const finished = all.filter((j) => j.status === 'done');
+  const failed = all.filter((j) => j.status === 'error');
+  $('kpi-projects').textContent = String(projects.length || new Set(
+    all.map((j) => j.project_slug).filter(Boolean)).size);
+  $('kpi-done').textContent = String(finished.length);
+  $('kpi-failed').textContent = String(failed.length);
+
+  // Recently finished.
+  const recent = all.filter((j) => !isActive(j))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 4);
+  $('recent-block').hidden = recent.length === 0;
+  $('recent-list').innerHTML = recent.map((job) => `
+    <a class="row" href="#/p/${encodeURIComponent(job.project_slug ?? '')}">
+      <span class="row-top">
+        <span class="row-name">${esc(job.project_slug ?? '—')}</span>
+        <span class="row-state ${job.status}"><i class="dot"></i>${job.status}</span>
+        <span class="row-when">${ago(job.created_at)}</span>
+      </span>
+      <span class="row-sub">${esc(job.prompt)}</span>
+    </a>`).join('');
+
+  $('usage-empty').hidden = usage.some((r) => r.pct != null);
+}
+
 // ─────────────────────────────────────────────── views
 
 function renderView() {
   const project = route.view === 'project';
   const pending = route.view === 'pending';
+  const home = route.view === 'home';
 
+  $('home-view').hidden = !home;
   $('chat-view').hidden = !project;
-  $('new-view').hidden = project || pending;
-  $('compose').hidden = pending;
+  $('new-view').hidden = !(route.view === 'new');
+  // Home has its own New-project button; the composer belongs to the other views.
+  $('compose').hidden = home || pending;
   $('visibility-wrap').hidden = project;
 
-  $('view-title').textContent = project ? route.slug
+  $('view-title').textContent = home ? 'claude‑remote'
+    : project ? route.slug
     : pending ? 'starting…' : 'New project';
 
   $('prompt').placeholder = project
@@ -333,6 +414,8 @@ function renderView() {
     const job = jobs.get(route.jobId);
     if (job?.project_slug) go(`#/p/${encodeURIComponent(job.project_slug)}`);
   }
+
+  if (home) renderHome();
 
   renderDrawer();
   renderUsage();

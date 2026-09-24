@@ -350,17 +350,108 @@ button.ghost {
   font-size: 12px; color: var(--muted); margin-bottom: .35rem;
 }
 
+/* Values sit in a stacked, right-aligned column, so tabular figures are
+   correct here - they keep the digits vertically aligned. */
 .usage-pct { font-variant-numeric: tabular-nums; font-weight: 560; color: var(--text); }
-.usage-row.warn .usage-pct { color: var(--run); }
-.usage-row.full .usage-pct { color: var(--err); }
 
-.usage-bar { height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.usage-row      { --meter: var(--ok); }
+.usage-row.warn { --meter: var(--run); }
+.usage-row.full { --meter: var(--err); }
+.usage-row.warn .usage-pct,
+.usage-row.full .usage-pct { color: var(--meter); }
+
+.usage-bar {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  /* Same ramp as the fill, lighter step - not a neutral track. */
+  background: color-mix(in srgb, var(--meter) 18%, transparent);
+}
 .usage-bar > i {
   display: block; height: 100%; width: 0;
-  background: var(--ok); border-radius: 3px;
+  background: var(--meter); border-radius: 3px;
   transition: width .4s ease, background-color .4s ease;
 }
-.usage-row.warn .usage-bar > i { background: var(--run); }
-.usage-row.full .usage-bar > i { background: var(--err); }
 
 .usage p { margin: .3rem 0 0; font-size: 11px; }
+
+/* ── home ───────────────────────────────────────────────── */
+#home-view { padding-bottom: 2.5rem; }
+#home-view section { margin-bottom: 1.75rem; }
+
+.section-h {
+  margin: 0 0 .625rem;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .09em;
+  color: var(--muted);
+}
+
+.hero { text-align: left; }
+
+/* The one number the page leads with. Proportional figures, not tabular:
+   tabular gives every digit the width of a 0 and reads loose at this size. */
+.hero-figure {
+  margin: 0; font-size: 3.5rem; line-height: 1;
+  font-weight: 600; letter-spacing: -.03em;
+  font-variant-numeric: proportional-nums;
+}
+.hero-label { margin: .2rem 0 0; font-size: 15px; font-weight: 520; }
+.hero .small { margin: .2rem 0 0; }
+
+/* ── stat tiles ─────────────────────────────────────────── */
+.kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+
+.tile {
+  padding: .75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.tile-label {
+  margin: 0 0 .15rem;
+  font-size: 11.5px; color: var(--muted);
+}
+.tile-value {
+  margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -.02em;
+  font-variant-numeric: proportional-nums;
+}
+
+/* ── rows (active / recent) ─────────────────────────────── */
+.stack { display: grid; gap: .375rem; }
+
+.row {
+  display: grid; gap: .15rem;
+  padding: .625rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-decoration: none; color: var(--text);
+}
+.row:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+
+.row-top { display: flex; align-items: baseline; gap: .5rem; }
+.row-name {
+  font-size: 14px; font-weight: 540; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.row-when { font-size: 11.5px; color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+.row-sub {
+  font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Status always ships as dot + word, never colour alone. */
+.row-state {
+  display: inline-flex; align-items: center; gap: .3rem; flex: none;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted);
+}
+.row-state.running { color: var(--run); }
+.row-state.running .dot { background: var(--run); animation: pulse 1.6s ease-in-out infinite; }
+.row-state.paused  { color: var(--accent); }
+.row-state.paused  .dot { background: var(--accent); }
+.row-state.done    { color: var(--ok); }
+.row-state.done    .dot { background: var(--ok); }
+.row-state.error   { color: var(--err); }
+.row-state.error   .dot { background: var(--err); }
+
+button.wide { width: 100%; padding: .75rem; margin-left: 0; }

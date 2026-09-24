@@ -51,6 +51,53 @@
     </button>
   </header>
 
+  <!-- ── home ───────────────────────────────────────── -->
+  <main id="home-view" hidden>
+    <section class="hero">
+      <p id="hero-value" class="hero-figure">0</p>
+      <p id="hero-label" class="hero-label">agents running</p>
+      <p id="hero-sub" class="muted small"></p>
+    </section>
+
+    <section id="active-block" hidden>
+      <h2 class="section-h">Active now</h2>
+      <div id="active-list" class="stack"></div>
+    </section>
+
+    <section>
+      <h2 class="section-h">Usage</h2>
+      <div id="usage-home" class="usage"></div>
+      <p id="usage-empty" class="muted small" hidden>
+        No readings yet — your desktop reports these when it starts up.
+      </p>
+    </section>
+
+    <section>
+      <h2 class="section-h">At a glance</h2>
+      <div class="kpi-row">
+        <div class="tile">
+          <p class="tile-label">Projects</p>
+          <p id="kpi-projects" class="tile-value">—</p>
+        </div>
+        <div class="tile">
+          <p class="tile-label">Finished</p>
+          <p id="kpi-done" class="tile-value">—</p>
+        </div>
+        <div class="tile">
+          <p class="tile-label">Needs a look</p>
+          <p id="kpi-failed" class="tile-value">—</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="recent-block" hidden>
+      <h2 class="section-h">Recently finished</h2>
+      <div id="recent-list" class="stack"></div>
+    </section>
+
+    <button id="home-new" class="primary wide">＋ New project</button>
+  </main>
+
   <!-- ── project chat ───────────────────────────────── -->
   <main id="chat-view" hidden>
     <div id="thread" class="thread"></div>
