@@ -222,6 +222,17 @@ button.ghost {
 .job-status.error    { color: var(--err); }
 .job-status.queued,
 .job-status.canceled { color: var(--muted); }
+.job-status.paused   { color: var(--accent); }
+.job-status.paused .dot { background: var(--accent); }
+
+.job-paused {
+  margin: .5rem 0 0; padding: .5rem .625rem;
+  font-size: 12.5px; line-height: 1.45;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+}
 
 .job-status.running .dot { background: var(--run); animation: pulse 1.6s ease-in-out infinite; }
 .job-status.done     .dot { background: var(--ok); }

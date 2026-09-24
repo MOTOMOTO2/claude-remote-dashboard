@@ -46,13 +46,15 @@ const money = (n) => (n == null ? '' : `$${Number(n).toFixed(2)}`);
 
 // ─────────────────────────────────────────────── rendering
 
-const ACTIVE = new Set(['queued', 'running']);
+const ACTIVE = new Set(['queued', 'running', 'paused']);
 
 function jobCard(job, { live }) {
   const log = events.get(job.id) ?? [];
   const last = [...log].reverse().find((e) => e.kind === 'tool' || e.kind === 'status');
 
-  const meta = live
+  const meta = job.status === 'paused'
+    ? (job.resume_at ? `resumes ${new Date(job.resume_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'waiting')
+    : live
     ? elapsed(job.claimed_at ?? job.created_at)
     : [job.num_turns ? `${job.num_turns} turns` : '', ago(job.created_at)].filter(Boolean).join(' · ');
 
@@ -65,10 +67,12 @@ function jobCard(job, { live }) {
       <div class="job-head">
         <span class="job-title">${esc(job.project_slug ?? 'naming…')}</span>
         <span class="job-status ${job.status}"><i class="dot"></i>${job.status}</span>
-        <span class="job-meta"${costHint} data-elapsed="${live ? job.claimed_at ?? job.created_at : ''}">${esc(meta)}</span>
+        <span class="job-meta"${costHint} data-elapsed="${live && job.status !== 'paused' ? job.claimed_at ?? job.created_at : ''}">${esc(meta)}</span>
       </div>
       <p class="job-prompt">${esc(job.prompt)}</p>
-      ${live && last ? `<p class="job-now">${esc(last.text)}</p>` : ''}
+      ${job.status === 'paused'
+        ? `<p class="job-paused">Usage limit reached. This picks up automatically where it left off${job.resume_at ? ` at ${new Date(job.resume_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''} — nothing for you to do.</p>`
+        : live && last ? `<p class="job-now">${esc(last.text)}</p>` : ''}
       ${live ? `<div class="log" data-log="${job.id}">${log.map(logLine).join('')}</div>` : ''}
       ${job.error ? `<p class="error">${esc(job.error)}</p>` : ''}
       <div class="job-actions">
