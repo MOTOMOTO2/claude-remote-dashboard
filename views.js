@@ -82,6 +82,8 @@ export function renderTopbar() {
   }
   $('view-sub').textContent = sub;
 
+  setBadge(jobList().filter((j) => j.status === 'running').length);
+
   const pill = $('host-badge');
   const { host, hostFresh } = state;
   pill.classList.toggle('online', hostFresh);
@@ -90,10 +92,11 @@ export function renderTopbar() {
 }
 
 export function hostExplainer() {
-  if (!state.host) return 'No desktop has ever checked in. Start the runner on your PC.';
-  if (state.hostFresh) return `${state.host.name} is online — jobs start right away.`;
+  const feed = state.realtime === 'live' ? '' : ' · live updates reconnecting';
+  if (!state.host) return `No desktop has ever checked in. Start the runner on your PC.${feed}`;
+  if (state.hostFresh) return `${state.host.name} is online — jobs start right away.${feed}`;
   return `${state.host.name} last checked in ${ago(state.host.last_seen)} ago. `
-    + 'Jobs will queue until it boots.';
+    + `Jobs will queue until it boots.${feed}`;
 }
 
 // ── sidebar ───────────────────────────────────────────────────────────
@@ -118,7 +121,9 @@ export function renderSidebar() {
     .filter((p) => match(p.name));
 
   const item = (slug, sub, trail) => `
-    <a class="list-item${route.slug === slug ? ' current' : ''}" href="${projectHref(slug)}">
+    <a class="list-item${route.slug === slug ? ' current' : ''}"
+       ${route.slug === slug ? 'aria-current="page"' : ''}
+       href="${projectHref(slug)}">
       <span class="li-top">
         <span class="li-name">${esc(slug)}</span>
         ${trail ?? ''}
@@ -266,8 +271,6 @@ export function renderHome() {
   const recent = all.filter((j) => !isActive(j)).sort(newest).slice(0, 5);
   $('recent-block').hidden = bare || !recent.length;
   $('recent-list').innerHTML = recent.map(jobRow).join('');
-
-  setBadge(running.length);
 }
 
 // ── project chat ──────────────────────────────────────────────────────
@@ -389,7 +392,10 @@ export function renderChat() {
 /** Append one log line in place, so a running job's log doesn't flicker. */
 export function appendLive(ev, onRerender) {
   const job = state.jobs.get(ev.job_id);
-  if (!job || route.view !== 'project' || job.project_slug !== route.slug) return;
+  const onScreen = job && (
+    (route.view === 'project' && job.project_slug === route.slug)
+    || (route.view === 'pending' && job.id === route.jobId));
+  if (!onScreen) return;
 
   const el = document.querySelector(`[data-log="${ev.job_id}"]`);
   // A closing summary changes the card's shape, so rebuild for that one.

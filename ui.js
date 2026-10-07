@@ -188,3 +188,66 @@ export function setBadge(count) {
     else navigator.clearAppBadge?.();
   } catch { /* unsupported */ }
 }
+
+// ── desktop / phone notifications ─────────────────────────────────────
+// No push server involved: the page asks the browser directly, and only
+// fires while it is in the background — a toast already covers the case
+// where you are looking at it.
+
+const NOTIFY_KEY = 'cr-notify';
+const supported = () => typeof window.Notification === 'function';
+
+export const notifyOn = () => {
+  try {
+    return supported()
+      && localStorage.getItem(NOTIFY_KEY) === 'on'
+      && window.Notification.permission === 'granted';
+  } catch { return false; }
+};
+
+function paintNotifyButton() {
+  const btn = $('notify-toggle');
+  if (!btn) return;
+  btn.hidden = !supported();
+  const on = notifyOn();
+  btn.setAttribute('aria-pressed', String(on));
+  btn.querySelector('use')?.setAttribute('href', on ? '#i-bell' : '#i-bell-off');
+  btn.title = on ? 'Notifications on — jobs tell you when they finish'
+                 : 'Notify me when a job finishes';
+}
+
+export async function toggleNotify() {
+  if (!supported()) { toast('This browser has no notifications', { bad: true }); return; }
+
+  if (notifyOn()) {
+    try { localStorage.setItem(NOTIFY_KEY, 'off'); } catch { /* blocked */ }
+    paintNotifyButton();
+    toast('Notifications off', { glyph: 'bell-off' });
+    return;
+  }
+
+  let permission = window.Notification.permission;
+  if (permission === 'default') permission = await window.Notification.requestPermission();
+  if (permission !== 'granted') {
+    toast('Notifications are blocked for this site', { bad: true, ms: 4000 });
+    paintNotifyButton();
+    return;
+  }
+
+  try { localStorage.setItem(NOTIFY_KEY, 'on'); } catch { /* blocked */ }
+  paintNotifyButton();
+  toast('Notifications on', { glyph: 'bell' });
+}
+
+export function initNotify() {
+  paintNotifyButton();
+  $('notify-toggle')?.addEventListener('click', toggleNotify);
+}
+
+/** Fires only when the page is hidden; otherwise the toast is enough. */
+export function notify(title, body) {
+  if (!notifyOn() || document.visibilityState === 'visible') return;
+  try {
+    new window.Notification(title, { body, icon: 'icon.png', tag: 'claude-remote' });
+  } catch { /* some browsers only allow this from a service worker */ }
+}
