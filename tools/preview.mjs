@@ -4,20 +4,23 @@
 //
 //   node --import ./test/register.mjs tools/preview.mjs home dark
 //
-// Writes preview/<view>-<theme>.html. Views: home · chat · new · auth.
+// Writes preview/<view>-<theme>.html. Views: home · chat · new · auth · empty.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fake } from '../test/fake-supabase.mjs';
 import { seed, makeWindow, tick, root } from '../test/harness.mjs';
 
 const [view = 'home', theme = 'light'] = process.argv.slice(2);
-const HASH = { home: '#/', chat: '#/p/alpha', new: '#/new', auth: '#/' };
+const HASH = { home: '#/', chat: '#/p/alpha', new: '#/new', auth: '#/', empty: '#/' };
 if (!(view in HASH)) {
   console.error(`unknown view "${view}" — pick one of ${Object.keys(HASH).join(', ')}`);
   process.exit(1);
 }
 
 seed();
+if (view === 'empty') {
+  for (const table of Object.keys(fake.tables)) fake.tables[table] = [];
+}
 const { dom, window } = makeWindow({ width: theme === 'mobile' ? 420 : 1200, dark: theme === 'dark' });
 window.localStorage.setItem('cr-theme', theme === 'dark' ? 'dark' : 'light');
 window.location.hash = HASH[view];

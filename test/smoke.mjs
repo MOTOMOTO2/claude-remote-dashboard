@@ -271,6 +271,12 @@ await tick();
 ok('"n" starts a new project', window.location.hash === '#/new');
 key('/');
 ok('"/" focuses the composer', window.document.activeElement === el('prompt'));
+window.document.activeElement.blur();
+window.location.hash = '#/';
+await tick();
+key('/');
+ok('"/" does nothing on home, where there is no composer',
+  window.document.activeElement !== el('prompt'));
 
 // ── 14. finish notifications ──────────────────────────────────────────
 
@@ -301,7 +307,29 @@ fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'error' });
 await tick();
 ok('nothing is raised once it is off', window.notifications.length === 1);
 
-// ── 15. markdown unit checks ──────────────────────────────────────────
+// ── 15. coming back to an empty account ───────────────────────────────
+
+window.location.hash = '#/';
+await tick();
+fake.tables.jobs = [];
+fake.tables.projects = [];
+fake.tables.usage_windows = [];
+fake.tables.job_events = [];
+
+// Returning to the tab resyncs — the same path a phone takes after sleeping.
+Object.defineProperty(window.document, 'visibilityState', { value: 'visible', configurable: true });
+window.document.dispatchEvent(new window.Event('visibilitychange'));
+await tick();
+
+ok('the first-run empty state appears', !el('home-empty').hidden);
+ok('the hero figure steps aside for it', el('hero-card').hidden);
+ok('the live block is hidden with nothing to show', el('active-block').hidden);
+ok('the usage block is hidden with no readings', el('usage-block').hidden);
+ok('the glance tiles are hidden too', el('glance-block').hidden);
+ok('starting a project is still one tap away', !el('home-new').hidden);
+has('the sidebar says so as well', el('project-list').textContent, 'No projects yet');
+
+// ── 16. markdown unit checks ──────────────────────────────────────────
 
 const { md } = await import('../md.js');
 has('headings render', md('# Title'), '<h1>Title</h1>');
