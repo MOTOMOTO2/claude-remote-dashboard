@@ -89,6 +89,15 @@ Renders one screen against the test fixtures and freezes it to
 Supabase project at all. Views: `home`, `chat`, `new`, `auth`, `empty`. Themes:
 `light`, `dark`. (`preview/` is gitignored.)
 
+To screenshot one headlessly:
+
+```sh
+chrome --headless --hide-scrollbars --force-device-scale-factor=2   --window-size=500,900 --screenshot=home.png preview/home-light.html
+```
+
+Chrome will not open a window narrower than ~500px, so for a true phone width
+point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
+
 ## The files
 
 | File | What's in it |
