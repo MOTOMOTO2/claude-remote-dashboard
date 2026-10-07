@@ -137,6 +137,8 @@ ok('title is the project name', text('view-title') === 'alpha');
 has('subtitle names the repo', text('view-sub'), 'me/alpha');
 
 ok('both turns render', el('thread').querySelectorAll('.turn').length === 2);
+ok('the open project is marked current',
+  el('project-list').querySelector('[aria-current="page"]')?.textContent.includes('alpha'));
 has('the prompt is shown', el('thread').innerHTML, 'build a snake game');
 has('markdown bold becomes strong', el('thread').innerHTML, '<strong>high-score</strong>');
 has('markdown list becomes a ul', el('thread').innerHTML, '<li>persists across reloads</li>');
@@ -270,7 +272,36 @@ ok('"n" starts a new project', window.location.hash === '#/new');
 key('/');
 ok('"/" focuses the composer', window.document.activeElement === el('prompt'));
 
-// ── 14. markdown unit checks ──────────────────────────────────────────
+// ── 14. finish notifications ──────────────────────────────────────────
+
+ok('the bell starts off', el('notify-toggle').getAttribute('aria-pressed') === 'false');
+el('notify-toggle').click();
+await tick();
+ok('turning the bell on asks for permission', window.Notification.permission === 'granted');
+ok('the bell reports that it is on', el('notify-toggle').getAttribute('aria-pressed') === 'true');
+ok('the choice is remembered', window.localStorage.getItem('cr-notify') === 'on');
+
+const row = (id) => fake.tables.jobs.find((j) => j.id === id);
+
+// While you are looking at the page a toast is enough.
+fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'done' });
+await tick();
+ok('no notification while the page is visible', window.notifications.length === 0);
+
+Object.defineProperty(window.document, 'visibilityState', { value: 'hidden', configurable: true });
+fake.emit('jobs', 'UPDATE', { ...row('j1'), status: 'error' });
+await tick();
+ok('a background finish raises a notification', window.notifications.length === 1);
+has('the notification names the project', window.notifications[0]?.title ?? '', 'alpha');
+
+el('notify-toggle').click();
+await tick();
+ok('the bell can be turned back off', el('notify-toggle').getAttribute('aria-pressed') === 'false');
+fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'error' });
+await tick();
+ok('nothing is raised once it is off', window.notifications.length === 1);
+
+// ── 15. markdown unit checks ──────────────────────────────────────────
 
 const { md } = await import('../md.js');
 has('headings render', md('# Title'), '<h1>Title</h1>');

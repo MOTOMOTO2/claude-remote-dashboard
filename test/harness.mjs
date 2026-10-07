@@ -112,6 +112,16 @@ export function makeWindow({ width = 1200, dark = false, html = file('index.html
   expose('window', window);
   expose('location', window.location);
 
+  // jsdom has no Notification API; this one records what was raised.
+  window.notifications = [];
+  function Notification(title, opts) { window.notifications.push({ title, ...opts }); }
+  Notification.permission = 'default';
+  Notification.requestPermission = async () => {
+    Notification.permission = 'granted';
+    return 'granted';
+  };
+  window.Notification = Notification;
+
   window.CONFIG = { supabaseUrl: 'https://x.supabase.co', supabaseAnonKey: 'anon' };
   window.confirm = () => true;
   Object.defineProperty(window.navigator, 'clipboard', {

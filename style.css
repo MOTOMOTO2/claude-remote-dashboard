@@ -489,8 +489,23 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--line-soft);
 }
-.foot-row { display: flex; align-items: center; gap: .5rem; }
+.foot-row { display: flex; align-items: center; gap: .4rem; }
 .foot-row .btn { margin-left: auto; }
+
+.toggle-btn {
+  display: grid; place-items: center; flex: none;
+  width: 2rem; height: 2rem; padding: 0;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--line); border-radius: var(--r-full);
+  cursor: pointer;
+  transition: color var(--dur-1) ease, background var(--dur-1) ease;
+}
+.toggle-btn svg { width: 15px; height: 15px; }
+.toggle-btn:hover { color: var(--text); }
+.toggle-btn[aria-pressed="true"] {
+  background: var(--accent-soft); color: var(--accent-text);
+  border-color: var(--accent-line);
+}
 
 .theme-switch {
   display: inline-flex; gap: 2px; flex: none;
@@ -683,11 +698,11 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   position: absolute; left: 50%; bottom: .75rem; z-index: 9;
   transform: translateX(-50%);
   display: inline-flex; align-items: center; gap: .3rem;
-  padding: .35rem .7rem;
-  background: var(--surface); color: var(--text-2);
-  border: 1px solid var(--line); border-radius: var(--r-full);
+  padding: .4rem .75rem;
+  background: var(--text); color: var(--bg);
+  border: 0; border-radius: var(--r-full);
   box-shadow: var(--shadow-2);
-  font-size: 12.5px; cursor: pointer;
+  font-size: 12.5px; font-weight: 550; cursor: pointer;
   /* Its own keyframes: `rise` would drop the centring translate mid-flight. */
   animation: jump-in var(--dur-2) var(--ease);
 }
@@ -696,7 +711,7 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 .jump svg { width: 14px; height: 14px; }
-.jump:hover { color: var(--text); border-color: var(--line-strong); }
+.jump:hover { background: color-mix(in srgb, var(--text) 88%, var(--accent)); }
 
 /* ── 4. components ──────────────────────────────────────────────────── */
 

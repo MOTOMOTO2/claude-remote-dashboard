@@ -5,7 +5,7 @@ import { $, firstLine } from './util.js';
 import * as store from './store.js';
 import * as views from './views.js';
 import {
-  initTheme, startTicker, toast, ask, copy,
+  initTheme, initNotify, notify, startTicker, toast, ask, copy,
   openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
 } from './ui.js';
 import { route, initRouter, syncRoute, go } from './router.js';
@@ -63,7 +63,20 @@ function scheduleRender() {
   pendingFrame = requestAnimationFrame(() => { pendingFrame = null; render(); });
 }
 
+/**
+ * One bad row should cost you that render, not the whole app: without this a
+ * thrown error leaves the UI frozen on stale markup with no clue why.
+ */
 function render() {
+  try {
+    draw();
+  } catch (err) {
+    console.error(err);
+    toast('Something failed to draw — reopen to retry', { bad: true, ms: 4000 });
+  }
+}
+
+function draw() {
   const v = route.view;
 
   // The pending view borrows the chat column so the message you just sent
@@ -346,8 +359,13 @@ store.on('change', scheduleRender);
 store.on('event', (ev) => views.appendLive(ev, scheduleRender));
 store.on('finish', (job) => {
   const name = job.project_slug ?? firstLine(job.prompt);
-  if (job.status === 'done') toast(`${name} finished`, { glyph: 'check' });
-  else if (job.status === 'error') toast(`${name} failed`, { bad: true });
+  if (job.status === 'done') {
+    toast(`${name} finished`, { glyph: 'check' });
+    notify(`${name} finished`, firstLine(job.prompt));
+  } else if (job.status === 'error') {
+    toast(`${name} failed`, { bad: true });
+    notify(`${name} failed`, job.error ?? firstLine(job.prompt));
+  }
 });
 
 // ── boot ──────────────────────────────────────────────────────────────
@@ -398,6 +416,7 @@ async function applySession(session) {
 }
 
 initTheme();
+initNotify();
 views.renderExamples();
 restoreSettings();
 initRouter(onRoute);

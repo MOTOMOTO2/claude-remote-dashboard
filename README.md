@@ -27,6 +27,9 @@ drives Claude Code lives on the PC.
 - **Live everything** — jobs, log lines and usage arrive over Supabase realtime,
   so nothing needs refreshing. A finished job raises a toast; the running count
   shows up in the tab title and on the installed app's icon.
+- **Tell me when it's done** — the bell in the sidebar footer turns on browser
+  notifications, which fire only while the page is in the background. No push
+  server is involved; nothing is sent anywhere.
 - **Light and dark** — follows the system by default, with a three-way switch in
   the sidebar footer. Both themes were picked for contrast, not inverted.
 - **Installable** — a PWA with an offline shell, so it opens instantly and still
@@ -78,7 +81,7 @@ it — there is no test-only seam in the app code.
 ## Looking at the design
 
 ```sh
-node --import ./test/register.mjs tools/preview.mjs home dark
+npm run preview -- home dark
 ```
 
 Renders one screen against the test fixtures and freezes it to
