@@ -1,7 +1,7 @@
 // Caches only the app shell, so the dashboard opens instantly and survives a
 // flaky connection. Supabase traffic is never cached — it must always be live.
-const SHELL = 'claude-remote-v5';
-const FILES = ['.', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icon.png'];
+const SHELL = 'claude-remote-v6';
+const FILES = ['.', 'index.html', 'style.css', 'app.js', 'store.js', 'views.js', 'ui.js', 'util.js', 'md.js', 'router.js', 'config.js', 'manifest.webmanifest', 'icon.png', 'favicon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -23,9 +23,10 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        caches.open(SHELL).then((c) => c.put(e.request, res.clone()));
+        const copy = res.clone();
+        caches.open(SHELL).then((c) => c.put(e.request, copy));
         return res;
       })
-      .catch(() => caches.match(e.request)),
+      .catch(() => caches.match(e.request).then((hit) => hit ?? caches.match('index.html'))),
   );
 });
