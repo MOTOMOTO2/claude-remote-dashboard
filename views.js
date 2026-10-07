@@ -234,7 +234,9 @@ export function renderHome() {
 
   const bare = !all.length && !state.projects.length && !state.loading;
   $('home-empty').hidden = !bare;
-  for (const id of ['active-block', 'usage-block', 'glance-block', 'recent-block']) {
+  // On a brand-new account the empty state is the whole page — a big zero
+  // above it is noise.
+  for (const id of ['hero-card', 'active-block', 'usage-block', 'glance-block', 'recent-block']) {
     $(id).hidden = bare;
   }
 

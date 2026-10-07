@@ -106,13 +106,15 @@ function draw() {
   $('send').disabled = v === 'pending';
 
   updateSummary();
-  if (stick) scrollToEnd('auto');
+  updateHint();
+  if (stick && inThread()) scrollToEnd('auto');
   updateJump();
 }
 
 // ── scrolling ─────────────────────────────────────────────────────────
 
 let stick = true;
+const inThread = () => route.view === 'project' || route.view === 'pending';
 const scroller = () => $('scroller');
 const nearBottom = () => {
   const el = scroller();
@@ -125,8 +127,7 @@ function scrollToEnd(behavior = 'smooth') {
 }
 
 function updateJump() {
-  const inThread = route.view === 'project' || route.view === 'pending';
-  $('jump').hidden = !(inThread && !nearBottom());
+  $('jump').hidden = !(inThread() && !nearBottom());
 }
 
 scroller().addEventListener('scroll', () => {
@@ -204,7 +205,12 @@ prompt.addEventListener('keydown', (e) => {
   e.preventDefault();
   $('composer').requestSubmit();
 });
-$('send-hint').textContent = 'Enter to send';
+/** Enter only sends where there is a real keyboard — say so, or say nothing. */
+function updateHint() {
+  $('send-hint').textContent = isNarrow() ? '' : 'Enter to send';
+}
+
+window.addEventListener('resize', () => { updateHint(); updateJump(); });
 
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -243,7 +249,7 @@ $('composer').addEventListener('submit', async (e) => {
   rememberSettings();
 
   toast(store.state.hostFresh ? 'Queued — your desktop has it' : 'Queued — waiting for your desktop');
-  if (!inProject) go(`#/j/${data.id}`);
+  if (!inProject && data?.id) go(`#/j/${data.id}`);
   else { scheduleRender(); scrollToEnd(); }
 });
 
@@ -305,6 +311,7 @@ document.addEventListener('click', async (e) => {
 
 // keyboard
 document.addEventListener('keydown', (e) => {
+  if ($('app').hidden) return;        // nothing to drive from the sign-in screen
   trapFocus(e);
 
   if (e.key === 'Escape') {
@@ -321,7 +328,7 @@ document.addEventListener('keydown', (e) => {
   const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
-  if (e.key === '/') { e.preventDefault(); prompt.focus(); }
+  if (e.key === '/' && !$('composer').hidden) { e.preventDefault(); prompt.focus(); }
   if (e.key === 'n') { e.preventDefault(); go('#/new'); focusPrompt(); }
 });
 

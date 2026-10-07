@@ -86,8 +86,8 @@ npm run preview -- home dark
 
 Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
-Supabase project at all. Views: `home`, `chat`, `new`, `auth`. Themes: `light`,
-`dark`. (`preview/` is gitignored.)
+Supabase project at all. Views: `home`, `chat`, `new`, `auth`, `empty`. Themes:
+`light`, `dark`. (`preview/` is gitignored.)
 
 ## The files
 
