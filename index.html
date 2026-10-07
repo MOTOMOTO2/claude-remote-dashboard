@@ -3,175 +3,323 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#11110f">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Queue coding jobs to your desktop from anywhere.">
 <title>claude-remote</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="claude-remote">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- ─────────────────────────────────────────── restoring session -->
-<section id="booting" class="centered">
-  <p class="muted">restoring session…</p>
-</section>
+<!-- ───────────────────────────────────────────────── boot splash -->
+<div id="boot" class="boot">
+  <svg class="spark spark-lg" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark"/></svg>
+  <p class="muted small">Restoring your session…</p>
+</div>
 
-<!-- ─────────────────────────────────────────── sign in -->
-<section id="auth" class="centered" hidden>
-  <form id="auth-form" class="card auth-card">
-    <h1>claude&#8209;remote</h1>
-    <p class="muted">Sign in to reach your desktop.</p>
-    <input id="email" type="email" placeholder="email" autocomplete="username" required>
-    <input id="password" type="password" placeholder="password" autocomplete="current-password" required>
-    <button type="submit" class="primary">Sign in</button>
-    <p id="auth-error" class="error" hidden></p>
-    <p id="storage-warning" class="error" hidden>
-      This browser is blocking site storage, so your sign-in can’t be
-      remembered. If you’re in a Private tab, open it normally. On iOS, add the
-      page to your Home Screen and sign in <em>inside that app</em> — a
-      home-screen app has its own separate storage from Safari.
+<!-- ───────────────────────────────────────────────── sign in -->
+<section id="auth" class="auth" hidden>
+  <form id="auth-form" class="auth-card" novalidate>
+    <div class="brand brand-lg">
+      <svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark"/></svg>
+      <h1>claude&#8209;remote</h1>
+    </div>
+    <p class="auth-tag">Queue coding jobs to your desktop — from anywhere.</p>
+
+    <label class="field">
+      <span class="field-label">Email</span>
+      <input id="email" type="email" inputmode="email" autocomplete="username"
+             placeholder="you@example.com" required>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Password</span>
+      <span class="field-wrap">
+        <input id="password" type="password" autocomplete="current-password"
+               placeholder="••••••••" required>
+        <button type="button" id="pw-toggle" class="field-btn"
+                aria-label="Show password" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"/></svg>
+        </button>
+      </span>
+    </label>
+
+    <button type="submit" id="auth-submit" class="btn primary block">Sign in</button>
+
+    <p id="auth-error" class="form-error" role="alert" hidden></p>
+    <p id="storage-warning" class="form-note" hidden>
+      This browser is blocking site storage, so your sign-in can’t be remembered.
+      If you’re in a Private tab, open the page normally. On iOS, add it to your
+      Home Screen and sign in <em>inside that app</em> — a home-screen app has
+      its own storage, separate from Safari.
     </p>
   </form>
 </section>
 
-<!-- ─────────────────────────────────────────── app -->
-<div id="app" hidden>
+<!-- ───────────────────────────────────────────────── app shell -->
+<div id="app" class="shell" hidden>
 
-  <header>
-    <span id="view-title" class="wordmark">claude&#8209;remote</span>
-    <span id="host-badge" class="badge" title="desktop status">
-      <i class="dot"></i><span id="host-name">checking…</span>
-    </span>
-    <button id="menu-open" class="icon-btn" aria-label="Projects" aria-expanded="false">
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M3 5.5h14M3 10h14M3 14.5h14" />
-      </svg>
+  <!-- ── sidebar (drawer on narrow screens) ────────────────── -->
+  <aside id="sidebar" class="sidebar" aria-label="Projects">
+    <div class="sidebar-head">
+      <a class="brand" href="#/">
+        <svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark"/></svg>
+        <span>claude&#8209;remote</span>
+      </a>
+      <button id="menu-close" class="icon-btn only-narrow" aria-label="Close menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+    <div class="sidebar-top">
+      <button id="new-project" class="btn primary block">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+        New project
+      </button>
+      <div class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="project-search" type="search" placeholder="Search projects"
+               autocomplete="off" aria-label="Search projects">
+      </div>
+    </div>
+
+    <nav id="project-list" class="project-list"></nav>
+
+    <div class="sidebar-foot">
+      <div id="usage-side" class="usage compact" hidden></div>
+      <div class="foot-row">
+        <div class="theme-switch" role="radiogroup" aria-label="Theme">
+          <button type="button" data-theme-set="system" title="Match system" aria-label="Match system theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-auto"/></svg>
+          </button>
+          <button type="button" data-theme-set="light" title="Light" aria-label="Light theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sun"/></svg>
+          </button>
+          <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-moon"/></svg>
+          </button>
+        </div>
+        <button id="sign-out" class="btn ghost">Sign out</button>
+      </div>
+    </div>
+  </aside>
+
+  <div id="scrim" class="scrim" hidden></div>
+
+  <!-- ── main column ───────────────────────────────────────── -->
+  <div class="main">
+    <header class="topbar">
+      <button id="menu-open" class="icon-btn only-narrow" aria-label="Open menu"
+              aria-controls="sidebar" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-menu"/></svg>
+      </button>
+
+      <div class="topbar-title">
+        <span id="view-title" class="tb-name">claude&#8209;remote</span>
+        <span id="view-sub" class="tb-sub"></span>
+      </div>
+
+      <button id="host-badge" class="pill" type="button">
+        <i class="dot"></i><span id="host-name">checking…</span>
+      </button>
+    </header>
+
+    <div class="stage">
+    <div id="scroller" class="scroller">
+
+      <!-- ── home ──────────────────────────────────────────── -->
+      <section id="home-view" class="view" hidden>
+        <div class="hero-card">
+          <p id="hero-eyebrow" class="hero-eyebrow">Right now</p>
+          <p id="hero-value" class="hero-figure">0</p>
+          <p id="hero-label" class="hero-label">agents running</p>
+          <div id="hero-chips" class="chip-row"></div>
+        </div>
+
+        <section id="active-block" class="block" hidden>
+          <h2 class="block-h"><span>Live now</span><span id="active-count" class="count"></span></h2>
+          <div id="active-list" class="stack"></div>
+        </section>
+
+        <section id="usage-block" class="block">
+          <h2 class="block-h"><span>Usage</span></h2>
+          <div id="usage-home" class="usage card"></div>
+          <p id="usage-empty" class="empty-note" hidden>
+            No readings yet — your desktop reports these when it starts up.
+          </p>
+        </section>
+
+        <section id="glance-block" class="block">
+          <h2 class="block-h"><span>At a glance</span></h2>
+          <div class="tile-row">
+            <div class="tile">
+              <p class="tile-label">Projects</p>
+              <p id="kpi-projects" class="tile-value">—</p>
+            </div>
+            <div class="tile">
+              <p class="tile-label">Finished</p>
+              <p id="kpi-done" class="tile-value">—</p>
+            </div>
+            <div class="tile">
+              <p class="tile-label">Needs a look</p>
+              <p id="kpi-failed" class="tile-value">—</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="recent-block" class="block" hidden>
+          <h2 class="block-h"><span>Recently finished</span></h2>
+          <div id="recent-list" class="stack"></div>
+        </section>
+
+        <div id="home-empty" class="empty" hidden>
+          <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark"/></svg>
+          <h3>Nothing here yet</h3>
+          <p>Start a project and your desktop picks it up — it creates the repo,
+             writes the code, and pushes it.</p>
+        </div>
+
+        <button id="home-new" class="btn primary block tall">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+          New project
+        </button>
+      </section>
+
+      <!-- ── project chat ──────────────────────────────────── -->
+      <section id="chat-view" class="view" hidden>
+        <div id="chat-head" class="chat-head" hidden></div>
+        <div id="thread" class="thread"></div>
+      </section>
+
+      <!-- ── new project ───────────────────────────────────── -->
+      <section id="new-view" class="view" hidden>
+        <div class="intro">
+          <svg class="intro-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark"/></svg>
+          <h2 class="intro-h">Start something new</h2>
+          <p class="intro-p">Describe what to build. Your desktop picks it up,
+             creates the repo, writes the code, and pushes it.</p>
+        </div>
+        <div class="block">
+          <h2 class="block-h"><span>Try one of these</span></h2>
+          <div id="example-row" class="example-row"></div>
+        </div>
+        <div id="usage-new" class="usage card" hidden></div>
+      </section>
+    </div>
+
+    <button id="jump" class="jump" type="button" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-down"/></svg>
+      Latest
     </button>
-  </header>
+    </div>
 
-  <!-- ── home ───────────────────────────────────────── -->
-  <main id="home-view" hidden>
-    <section class="hero">
-      <p id="hero-value" class="hero-figure">0</p>
-      <p id="hero-label" class="hero-label">agents running</p>
-      <p id="hero-sub" class="muted small"></p>
-    </section>
-
-    <section id="active-block" hidden>
-      <h2 class="section-h">Active now</h2>
-      <div id="active-list" class="stack"></div>
-    </section>
-
-    <section>
-      <h2 class="section-h">Usage</h2>
-      <div id="usage-home" class="usage"></div>
-      <p id="usage-empty" class="muted small" hidden>
-        No readings yet — your desktop reports these when it starts up.
-      </p>
-    </section>
-
-    <section>
-      <h2 class="section-h">At a glance</h2>
-      <div class="kpi-row">
-        <div class="tile">
-          <p class="tile-label">Projects</p>
-          <p id="kpi-projects" class="tile-value">—</p>
+    <!-- ── composer (chat + new project) ───────────────────── -->
+    <form id="composer" class="composer" hidden>
+      <div id="opts" class="opts" hidden>
+        <div class="opt">
+          <span class="opt-label">Thinking effort</span>
+          <div id="effort" class="segmented" role="radiogroup" aria-label="Thinking effort">
+            <label><input type="radio" name="effort" value="medium"><span>medium</span></label>
+            <label><input type="radio" name="effort" value="high" checked><span>high</span></label>
+            <label><input type="radio" name="effort" value="xhigh"><span>xhigh</span></label>
+            <label><input type="radio" name="effort" value="max"><span>max</span></label>
+          </div>
         </div>
-        <div class="tile">
-          <p class="tile-label">Finished</p>
-          <p id="kpi-done" class="tile-value">—</p>
+
+        <div class="opt">
+          <span class="opt-label">Pause at usage</span>
+          <div id="usage-cap" class="segmented" role="radiogroup" aria-label="Pause at usage">
+            <label><input type="radio" name="cap" value="25"><span>25%</span></label>
+            <label><input type="radio" name="cap" value="50"><span>50%</span></label>
+            <label><input type="radio" name="cap" value="75"><span>75%</span></label>
+            <label><input type="radio" name="cap" value="90" checked><span>90%</span></label>
+            <label><input type="radio" name="cap" value="100"><span>off</span></label>
+          </div>
+          <p class="opt-note">The job pauses if your 5-hour usage reaches this, then
+             resumes itself when the window resets.</p>
         </div>
-        <div class="tile">
-          <p class="tile-label">Needs a look</p>
-          <p id="kpi-failed" class="tile-value">—</p>
+
+        <div class="opt" id="visibility-wrap">
+          <span class="opt-label">Repository</span>
+          <div id="visibility" class="segmented" role="radiogroup" aria-label="Repository">
+            <label><input type="radio" name="vis" value="private" checked><span>private</span></label>
+            <label><input type="radio" name="vis" value="public"><span>public</span></label>
+            <label><input type="radio" name="vis" value="none"><span>local only</span></label>
+          </div>
         </div>
       </div>
-    </section>
 
-    <section id="recent-block" hidden>
-      <h2 class="section-h">Recently finished</h2>
-      <div id="recent-list" class="stack"></div>
-    </section>
-
-    <button id="home-new" class="primary wide">＋ New project</button>
-  </main>
-
-  <!-- ── project chat ───────────────────────────────── -->
-  <main id="chat-view" hidden>
-    <div id="thread" class="thread"></div>
-  </main>
-
-  <!-- ── new project ────────────────────────────────── -->
-  <main id="new-view" hidden>
-    <div class="intro">
-      <h2 class="intro-h">New project</h2>
-      <p class="muted">Describe what to build. Your desktop picks it up, creates
-        the repo, writes the code, and pushes it.</p>
-    </div>
-    <div id="usage-new" class="usage" hidden></div>
-  </main>
-
-  <!-- ── compose (shared by both views) ─────────────── -->
-  <form id="compose" class="compose" hidden>
-    <textarea id="prompt" rows="1" required
-      placeholder="create a simple mario game"></textarea>
-
-    <div class="compose-row">
-      <label class="mini" title="How hard Claude thinks. Higher is more thorough.">
-        <select id="effort">
-          <option value="medium">medium</option>
-          <option value="high" selected>high</option>
-          <option value="xhigh">xhigh</option>
-          <option value="max">max</option>
-        </select>
-      </label>
-
-      <label class="mini" title="Pause the job if your 5-hour usage reaches this. It resumes itself when the window resets.">
-        <select id="usage-cap">
-          <option value="25">cap 25%</option>
-          <option value="50">cap 50%</option>
-          <option value="75">cap 75%</option>
-          <option value="90" selected>cap 90%</option>
-          <option value="100">cap 100%</option>
-        </select>
-      </label>
-
-      <label class="mini" id="visibility-wrap">
-        <select id="visibility">
-          <option value="private">private repo</option>
-          <option value="public">public repo</option>
-          <option value="none">local only</option>
-        </select>
-      </label>
-
-      <button type="submit" class="primary" id="send">Send</button>
-    </div>
-    <p id="compose-note" class="muted small" hidden></p>
-  </form>
+      <div class="composer-box">
+        <textarea id="prompt" rows="1" required enterkeyhint="send"
+          placeholder="Describe what to build…"></textarea>
+        <div class="composer-bar">
+          <button type="button" id="opts-toggle" class="chip" aria-expanded="false"
+                  aria-controls="opts">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sliders"/></svg>
+            <span id="opts-summary">high · cap 90%</span>
+          </button>
+          <span class="grow"></span>
+          <span id="send-hint" class="send-hint"></span>
+          <button type="submit" id="send" class="send-btn" aria-label="Send">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-send"/></svg>
+          </button>
+        </div>
+      </div>
+      <p id="composer-note" class="form-error" hidden></p>
+    </form>
+  </div>
 </div>
 
-<!-- ─────────────────────────────────────────── drawer -->
-<div id="scrim" class="scrim" hidden></div>
+<!-- ───────────────────────────────────────────────── overlays -->
+<div id="offline-bar" class="offline-bar" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-offline"/></svg>
+  Offline — showing the last synced state
+</div>
 
-<aside id="drawer" class="drawer" hidden aria-label="Projects">
-  <div class="drawer-head">
-    <button id="new-project" class="new-btn">
-      <span aria-hidden="true">＋</span> New project
-    </button>
-    <button id="menu-close" class="icon-btn" aria-label="Close">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
-    </button>
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+<dialog id="confirm" class="dialog">
+  <h3 id="confirm-title">Are you sure?</h3>
+  <p id="confirm-body" class="muted small"></p>
+  <div class="dialog-row">
+    <button id="confirm-no" class="btn ghost" type="button">Cancel</button>
+    <button id="confirm-yes" class="btn danger" type="button">Confirm</button>
   </div>
+</dialog>
 
-  <nav id="drawer-list" class="drawer-list"></nav>
-
-  <div class="drawer-foot">
-    <div id="usage-drawer" class="usage" hidden></div>
-    <button id="sign-out" class="ghost">Sign out</button>
-  </div>
-</aside>
+<!-- ───────────────────────────────────────────────── icon sprite -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <defs>
+    <!-- Brand mark: an eight-ray spark. Mirrored in favicon.svg. -->
+    <g id="i-spark"><path d="M12 2.6v18.8M3.6 12h16.8M6.1 6.1l11.8 11.8M17.9 6.1L6.1 17.9"/></g>
+    <g id="i-menu"><path d="M4 7h16M4 12h16M4 17h16"/></g>
+    <g id="i-close"><path d="M6 6l12 12M18 6L6 18"/></g>
+    <g id="i-plus"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-search"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></g>
+    <g id="i-send"><path d="M12 19.5V5m0 0l-6 6m6-6l6 6"/></g>
+    <g id="i-sliders"><path d="M4 8h9m5 0h2M4 16h3m5 0h8"/><circle cx="15.5" cy="8" r="2.3"/><circle cx="9.5" cy="16" r="2.3"/></g>
+    <g id="i-down"><path d="M12 5v14m0 0l-6-6m6 6l6-6"/></g>
+    <g id="i-copy"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15.5 6.5A2.5 2.5 0 0013 4H6.5A2.5 2.5 0 004 6.5V13a2.5 2.5 0 002.5 2.5"/></g>
+    <g id="i-link"><path d="M14 4.5h5.5V10M19.5 4.5l-8 8M17 14v4.5A1.5 1.5 0 0115.5 20h-10A1.5 1.5 0 014 18.5v-10A1.5 1.5 0 015.5 7H10"/></g>
+    <g id="i-stop"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></g>
+    <g id="i-retry"><path d="M20 12a8 8 0 11-2.6-5.9M20 4.5V9h-4.5"/></g>
+    <g id="i-trash"><path d="M5 7.5h14M9.5 7.5V5.8A1.3 1.3 0 0110.8 4.5h2.4a1.3 1.3 0 011.3 1.3v1.7M7 7.5l.8 11A1.5 1.5 0 009.3 20h5.4a1.5 1.5 0 001.5-1.4l.8-11"/></g>
+    <g id="i-sun"><circle cx="12" cy="12" r="4"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10l1.4 1.4m0-12.8l-1.4 1.4m-10 10L5.6 18.4"/></g>
+    <g id="i-moon"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></g>
+    <g id="i-auto"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 010 16z" fill="currentColor" stroke="none"/></g>
+    <g id="i-eye"><path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></g>
+    <g id="i-offline"><path d="M3 3l18 18M8.5 16.5a5 5 0 017-7M5.2 13a9 9 0 0112.6-2.4M12 20h.01"/></g>
+    <g id="i-folder"><path d="M4 7.5A1.5 1.5 0 015.5 6h3.2l1.8 2h8A1.5 1.5 0 0120 9.5v8A1.5 1.5 0 0118.5 19h-13A1.5 1.5 0 014 17.5z"/></g>
+    <g id="i-check"><path d="M5 13l4.5 4.5L19 7"/></g>
+  </defs>
+</svg>
 
 <script src="config.js"></script>
 <script type="module" src="app.js"></script>
