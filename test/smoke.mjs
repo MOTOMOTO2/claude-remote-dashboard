@@ -84,6 +84,8 @@ has('hero chips mention the paused job', el('hero-chips').innerHTML, 'paused for
 
 ok('live block is visible', !el('active-block').hidden);
 ok('live block lists the two open jobs', el('active-list').querySelectorAll('.row').length === 2);
+ok('every live row links somewhere real',
+  [...el('active-list').querySelectorAll('.row')].every((r) => /#\/(p|j)\/.+/.test(r.getAttribute('href'))));
 has('live row shows the current activity', el('active-list').innerHTML, 'Edit src/game.js');
 
 const meters = el('usage-home').querySelectorAll('.meter');
