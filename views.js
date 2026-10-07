@@ -43,9 +43,12 @@ function timing(job) {
   return `<span data-ago="${esc(job.created_at)}">${ago(job.created_at)}</span>`;
 }
 
+const jobHref = (job) =>
+  (job.project_slug ? projectHref(job.project_slug) : `#/j/${encodeURIComponent(job.id)}`);
+
 const jobRow = (job) => `
   <a class="row${job.status === 'running' ? ' live' : ''}" data-status="${esc(job.status)}"
-     href="${projectHref(job.project_slug)}">
+     href="${jobHref(job)}">
     <span class="row-top">
       <span class="row-name">${esc(job.project_slug ?? 'naming…')}</span>
       ${stateTag(job.status, job.status === 'running')}
@@ -115,7 +118,6 @@ export function renderSidebar() {
     .sort((a, b) => (Number(isActive(b.job)) - Number(isActive(a.job)))
       || newest(a.job, b.job));
 
-  const touched = new Set(chats.map((c) => c.slug));
   const repos = state.projects
     .filter((p) => !jobList().some((j) => j.project_slug === p.name))
     .filter((p) => match(p.name));
