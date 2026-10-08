@@ -8,7 +8,7 @@ import {
   initTheme, initNotify, notify, startTicker, toast, ask, copy,
   openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
 } from './ui.js';
-import { route, initRouter, syncRoute, go } from './router.js';
+import { route, initRouter, syncRoute, go, projectHref } from './router.js';
 
 if (!store.configured) {
   document.body.innerHTML =
@@ -90,6 +90,8 @@ function draw() {
   views.renderTopbar();
   views.renderSidebar();
   views.renderUsage();
+  // Only two views show them, and they read the whole account to work it out.
+  if (v === 'home' || v === 'new') views.renderSuggestions();
 
   if (v === 'home') views.renderHome();
   if (v === 'project') views.renderChat();
@@ -162,6 +164,7 @@ $('project-search').addEventListener('input', (e) => {
 });
 
 $('host-badge').addEventListener('click', () => toast(views.hostExplainer(), { glyph: 'auto', ms: 4000 }));
+$('usage-pill').addEventListener('click', () => toast(views.usageSentence(), { glyph: 'gauge', ms: 5000 }));
 
 $('sign-out').addEventListener('click', async () => {
   closeDrawer();
@@ -255,11 +258,20 @@ $('composer').addEventListener('submit', async (e) => {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-example]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest]');
   if (!btn) return;
   const d = btn.dataset;
 
-  if (d.example) { go('#/new'); fillPrompt(d.example); return; }
+  // A suggestion is only ever a head start: it lands in the composer, aimed at
+  // the project it was derived from, and you still press send.
+  if (d.suggest) {
+    const s = views.suggestionById(d.suggest);
+    if (!s) return;
+    go(s.slug ? projectHref(s.slug) : '#/new');
+    fillPrompt(s.prompt);
+    toast(s.slug ? `Ready for ${s.slug} — edit or send` : 'Dropped into the composer');
+    return;
+  }
 
   if (d.cancel) {
     btn.disabled = true;
@@ -424,7 +436,7 @@ async function applySession(session) {
 
 initTheme();
 initNotify();
-views.renderExamples();
+views.renderSuggestions();
 restoreSettings();
 initRouter(onRoute);
 

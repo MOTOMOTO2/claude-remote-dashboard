@@ -8,61 +8,69 @@
      4. components  · meters, tiles, rows, thread, chips, toasts, dialog
 
    Colour rules this file follows:
-     · The clay accent is brand + interaction only. It never encodes data.
-     · State uses the reserved status ramp (good / warning / serious /
-       critical) and always ships as dot-or-icon + word, never colour alone.
-     · Every text colour here clears 4.5:1 on the surface it sits on; every
-       meter fill clears 3:1. Values were measured, not eyeballed.
+     · The violet accent is brand + interaction only. It never encodes data.
+     · State uses a reserved status ramp (good / warning / active / critical)
+       and always ships as dot-or-icon + word, never colour alone.
+     · Every text colour clears 4.5:1 on the surface it sits on, and every
+       mark — status dot, meter fill, bar — clears 3:1. Those numbers are
+       asserted by `npm run contrast`; nothing here was eyeballed.
+     · Nothing is orange. The one hue that used to be, the brand clay, is a
+       violet now, and the status ramp runs amber → red with blue for work in
+       progress, so "running" no longer reads as a warning.
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── 1. tokens ──────────────────────────────────────────────────────── */
 :root {
   color-scheme: light;
 
-  --bg:          #faf9f6;
+  --bg:          #f7f7fb;
   --surface:     #ffffff;
-  --surface-2:   #f2f0ea;
-  --surface-3:   #e9e6de;
-  --line:        #e5e1d8;
-  --line-soft:   #efece4;
-  --line-strong: #d3cdc0;
+  --surface-2:   #f0f0f6;
+  --surface-3:   #e6e6ef;
+  --line:        #e3e3ed;
+  --line-soft:   #ededf4;
+  --line-strong: #cbcbdb;
 
-  --text:        #1a1917;
-  --text-2:      #57544d;
-  --muted:       #6e6a60;
+  --text:        #16161d;
+  --text-2:      #4f4f5d;
+  --muted:       #65657a;
 
-  --accent:      #b4501e;   /* 4.9:1 on --bg  ·  white on it: 5.1:1 */
+  --accent:      #6d28d9;   /* 6.8:1 on --bg  ·  white on it: 7.1:1 */
   --accent-fg:   #ffffff;
-  --accent-text: #b4501e;
-  --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  --accent-line: color-mix(in srgb, var(--accent) 28%, var(--line));
+  --accent-text: #6d28d9;
+  --accent-soft: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  --accent-line: color-mix(in srgb, var(--accent) 26%, var(--line));
 
-  /* Status ramp — marks. Fixed hues, never themed away. */
-  --good:        #0ca30c;
-  --warn:        #fab219;
-  --serious:     #ec835a;
+  /* Status ramp — marks. Stepped per theme, so every mark clears 3:1 on the
+     surface it lands on; `warning` as shipped amber does not, on white. */
+  --good:        #0b9a0b;
+  --warn:        #9e8000;
+  --active:      #2a78d6;
   --critical:    #d03b3b;
+
+  /* The neutral a data bar is drawn in — a mark, so it clears 3:1 too. */
+  --bar:         #8a8a9c;
 
   /* Status ramp — text steps that clear 4.5:1 on a light surface. */
   --good-text:     #17711f;
-  --warn-text:     #8a6300;
-  --serious-text:  #b4551f;
+  --warn-text:     #6f5a00;
+  --active-text:   #1c5cab;
   --critical-text: #b22d2d;
 
-  --shadow-1: 0 1px 2px rgb(26 25 23 / .04), 0 1px 1px rgb(26 25 23 / .03);
-  --shadow-2: 0 4px 16px -4px rgb(26 25 23 / .10), 0 2px 6px -2px rgb(26 25 23 / .06);
-  --shadow-3: 0 18px 48px -12px rgb(26 25 23 / .22), 0 6px 16px -6px rgb(26 25 23 / .12);
+  --shadow-1: 0 1px 2px rgb(22 22 40 / .05), 0 1px 1px rgb(22 22 40 / .03);
+  --shadow-2: 0 6px 20px -6px rgb(22 22 40 / .13), 0 2px 6px -2px rgb(22 22 40 / .07);
+  --shadow-3: 0 22px 54px -14px rgb(22 22 40 / .26), 0 6px 16px -6px rgb(22 22 40 / .14);
 
-  --r-xs: 6px;
-  --r-sm: 9px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 22px;
+  --r-xs: 7px;
+  --r-sm: 10px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-xl: 24px;
   --r-full: 999px;
 
   --head-h: 3.5rem;
   --rail:   17.5rem;
-  --measure: 46rem;
+  --measure: 47rem;
 
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
@@ -83,72 +91,88 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --bg:          #121211;
-    --surface:     #1b1b19;
-    --surface-2:   #232321;
-    --surface-3:   #2c2c29;
-    --line:        #302f2c;
-    --line-soft:   #262624;
-    --line-strong: #44433e;
+    --bg:          #101014;
+    --surface:     #18181f;
+    --surface-2:   #20202a;
+    --surface-3:   #2a2a35;
+    --line:        #2b2b37;
+    --line-soft:   #22222c;
+    --line-strong: #3f3f4f;
 
-    --text:        #f2f0ea;
-    --text-2:      #b3ada1;
-    --muted:       #938d81;
+    --text:        #f1f1f6;
+    --text-2:      #b6b6c6;
+    --muted:       #9696a8;
 
-    --accent:      #d97757;   /* 6.0:1 on --bg */
-    --accent-fg:   #17150f;
-    --accent-text: #e08455;
-    --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
-    --accent-line: color-mix(in srgb, var(--accent) 34%, var(--line));
+    --accent:      #b79cff;   /* 8.2:1 on --bg */
+    --accent-fg:   #171225;
+    --accent-text: #c3aeff;
+    --accent-soft: color-mix(in srgb, var(--accent) 13%, var(--surface));
+    --accent-line: color-mix(in srgb, var(--accent) 32%, var(--line));
 
-    --good-text:     #2fb82f;
-    --warn-text:     #fab219;
-    --serious-text:  #ec835a;
-    --critical-text: #e86b6b;
+    --good:        #2fb82f;
+    --warn:        #ecc12b;
+    --active:      #4d93e8;
+    --critical:    #e05c5c;
 
-    --shadow-1: 0 1px 2px rgb(0 0 0 / .32);
-    --shadow-2: 0 4px 18px -4px rgb(0 0 0 / .45), 0 2px 6px -2px rgb(0 0 0 / .3);
-    --shadow-3: 0 20px 56px -14px rgb(0 0 0 / .7), 0 6px 18px -6px rgb(0 0 0 / .45);
+    --bar:         #74748a;
+
+    --good-text:     #4ccb4c;
+    --warn-text:     #efcb55;
+    --active-text:   #85b8f1;
+    --critical-text: #ef8686;
+
+    --shadow-1: 0 1px 2px rgb(0 0 0 / .36);
+    --shadow-2: 0 6px 22px -6px rgb(0 0 0 / .5), 0 2px 6px -2px rgb(0 0 0 / .34);
+    --shadow-3: 0 24px 60px -16px rgb(0 0 0 / .72), 0 6px 18px -6px rgb(0 0 0 / .48);
   }
 }
 
+/* The toggle has to beat the OS setting, so the same steps are declared again
+   under the stamped scope. `npm run contrast` checks the two stay identical. */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg:          #121211;
-  --surface:     #1b1b19;
-  --surface-2:   #232321;
-  --surface-3:   #2c2c29;
-  --line:        #302f2c;
-  --line-soft:   #262624;
-  --line-strong: #44433e;
+    --bg:          #101014;
+    --surface:     #18181f;
+    --surface-2:   #20202a;
+    --surface-3:   #2a2a35;
+    --line:        #2b2b37;
+    --line-soft:   #22222c;
+    --line-strong: #3f3f4f;
 
-  --text:        #f2f0ea;
-  --text-2:      #b3ada1;
-  --muted:       #938d81;
+    --text:        #f1f1f6;
+    --text-2:      #b6b6c6;
+    --muted:       #9696a8;
 
-  --accent:      #d97757;
-  --accent-fg:   #17150f;
-  --accent-text: #e08455;
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  --accent-line: color-mix(in srgb, var(--accent) 34%, var(--line));
+    --accent:      #b79cff;   /* 8.2:1 on --bg */
+    --accent-fg:   #171225;
+    --accent-text: #c3aeff;
+    --accent-soft: color-mix(in srgb, var(--accent) 13%, var(--surface));
+    --accent-line: color-mix(in srgb, var(--accent) 32%, var(--line));
 
-  --good-text:     #2fb82f;
-  --warn-text:     #fab219;
-  --serious-text:  #ec835a;
-  --critical-text: #e86b6b;
+    --good:        #2fb82f;
+    --warn:        #ecc12b;
+    --active:      #4d93e8;
+    --critical:    #e05c5c;
 
-  --shadow-1: 0 1px 2px rgb(0 0 0 / .32);
-  --shadow-2: 0 4px 18px -4px rgb(0 0 0 / .45), 0 2px 6px -2px rgb(0 0 0 / .3);
-  --shadow-3: 0 20px 56px -14px rgb(0 0 0 / .7), 0 6px 18px -6px rgb(0 0 0 / .45);
+    --bar:         #74748a;
+
+    --good-text:     #4ccb4c;
+    --warn-text:     #efcb55;
+    --active-text:   #85b8f1;
+    --critical-text: #ef8686;
+
+    --shadow-1: 0 1px 2px rgb(0 0 0 / .36);
+    --shadow-2: 0 6px 22px -6px rgb(0 0 0 / .5), 0 2px 6px -2px rgb(0 0 0 / .34);
+    --shadow-3: 0 24px 60px -16px rgb(0 0 0 / .72), 0 6px 18px -6px rgb(0 0 0 / .48);
 }
 
 /* One status → one tone. Components read `--tone`, so a new state is a
    single rule here rather than a colour edit in every component. */
 [data-status]              { --tone: var(--muted);    --tone-text: var(--muted); }
 [data-status="queued"]     { --tone: var(--muted);    --tone-text: var(--muted); }
-[data-status="running"]    { --tone: var(--warn);     --tone-text: var(--warn-text); }
-[data-status="paused"]     { --tone: var(--serious);  --tone-text: var(--serious-text); }
+[data-status="running"]    { --tone: var(--active);   --tone-text: var(--active-text); }
+[data-status="paused"]     { --tone: var(--warn);     --tone-text: var(--warn-text); }
 [data-status="done"]       { --tone: var(--good);     --tone-text: var(--good-text); }
 [data-status="error"]      { --tone: var(--critical); --tone-text: var(--critical-text); }
 [data-status="cancelled"]  { --tone: var(--muted);    --tone-text: var(--muted); }
@@ -382,11 +406,18 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   cursor: pointer;
   transition: border-color var(--dur-1) ease;
 }
-.pill:hover { border-color: var(--line-strong); }
+.pill:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.pill svg { width: 14px; height: 14px; }
 .pill.online  { color: var(--good-text); }
 .pill.offline { color: var(--muted); }
 .pill.online  .dot { background: var(--good); }
 .pill.offline .dot { background: var(--muted); }
+/* The usage pill is a reading, so it wears the severity it is reporting —
+   and its title spells the same thing out in words. */
+.pill.warn { color: var(--warn-text); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.pill.full { color: var(--critical-text); border-color: color-mix(in srgb, var(--critical) 45%, var(--line)); }
+.pill-sub { color: var(--muted); }
+@media (max-width: 599px) { .pill-sub { display: none; } }
 
 .dot {
   width: 7px; height: 7px; flex: none;
@@ -475,6 +506,11 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   font-size: 10px; font-weight: 650;
   text-transform: uppercase; letter-spacing: .05em;
   background: var(--surface-2); color: var(--muted);
+}
+/* A project name is a name, not a label — it keeps its own casing. */
+.tag.plain {
+  text-transform: none; letter-spacing: 0; font-size: 10.5px; font-weight: 600;
+  max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tag[data-status] {
   background: color-mix(in srgb, var(--tone) 16%, transparent);
@@ -571,9 +607,12 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   }
   #home-view > .hero-card,
   #home-view > #active-block,
+  #home-view > #suggest-block,
   #home-view > #recent-block { grid-column: 1; }
   #home-view > #usage-block,
   #home-view > #glance-block,
+  #home-view > #activity-block,
+  #home-view > #desktop-block,
   #home-view > #home-new { grid-column: 2; }
   #home-view > #home-empty { grid-column: 1 / -1; }
 }
@@ -735,6 +774,15 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   background: var(--surface-2); border-radius: var(--r-full);
   font-size: 10.5px; letter-spacing: .03em; color: var(--text-2);
 }
+/* A heading can carry one fact, in sentence case — it reads as a subtitle,
+   not as another label. */
+.block-note {
+  margin-left: auto;
+  font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.block-note:empty { display: none; }
 
 .empty-note { margin: .5rem 0 0; font-size: 12.5px; color: var(--muted); }
 .empty-note.center { margin: 1.25rem auto 0; max-width: 24rem; text-align: center; }
@@ -767,11 +815,22 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 /* Proportional figures: tabular-nums gives every digit a zero's width and
    reads loose at display size. Tabular is for columns, not for this. */
 .hero-figure {
-  margin: .35rem 0 0; font-size: 3.4rem; line-height: .95;
-  font-weight: 600; letter-spacing: -.035em;
+  margin: .35rem 0 0; font-size: clamp(3.2rem, 12vw, 3.9rem); line-height: .93;
+  font-weight: 600; letter-spacing: -.038em;
   font-variant-numeric: proportional-nums;
 }
 .hero-label { margin: .25rem 0 0; font-size: 15px; font-weight: 550; }
+
+/* What the lead agent is doing this second — the sentence the figure can't say. */
+.hero-now {
+  display: flex; align-items: center; gap: .4rem;
+  margin: .8rem 0 0; padding-top: .7rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px; color: var(--muted); min-width: 0;
+}
+.hero-now svg { width: 14px; height: 14px; color: var(--active); flex: none; }
+.hero-now span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero-now b { font-weight: 600; color: var(--text-2); }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .75rem; }
 .chip-row:empty { display: none; }
@@ -792,20 +851,33 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 .stat-chip b { font-weight: 650; font-variant-numeric: tabular-nums; }
 
 /* stat tiles */
-.tile-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+.tile-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+@media (min-width: 540px) { .tile-row { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 1140px) { .tile-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tile {
-  padding: .7rem .75rem;
+  padding: .7rem .8rem .75rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-1) ease;
 }
-.tile-label { margin: 0; font-size: 11.5px; color: var(--muted); }
+.tile:hover { border-color: var(--line-strong); }
+.tile-label {
+  margin: 0; font-size: 11px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em;
+}
 .tile-value {
-  margin: .15rem 0 0; font-size: 1.6rem; line-height: 1.1;
-  font-weight: 600; letter-spacing: -.025em;
+  margin: .2rem 0 0; font-size: 1.65rem; line-height: 1.05;
+  font-weight: 600; letter-spacing: -.028em;
   font-variant-numeric: proportional-nums;
 }
+.tile-note {
+  margin: .15rem 0 0; font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile-note:empty { display: none; }
+.tile.flag { border-color: color-mix(in srgb, var(--critical) 34%, var(--line)); }
 .tile.flag .tile-value { color: var(--critical-text); }
 
 /* rows */
@@ -869,13 +941,39 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 .meter.warn { --meter: var(--warn); }
 .meter.full { --meter: var(--critical); }
 
-.meter-head { display: flex; align-items: baseline; gap: .5rem; font-size: 12px; }
-.meter-name { color: var(--text-2); }
-.meter-reset { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.meter-head { display: flex; align-items: baseline; gap: .45rem; font-size: 12.5px; }
+.meter-name { color: var(--text); font-weight: 560; }
+/* Severity in a word, next to the colour that says the same thing. */
+.meter-state {
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted);
+}
+.meter-state .dot { width: 6px; height: 6px; background: var(--meter); }
+.meter.warn .meter-state { color: var(--warn-text); }
+.meter.full .meter-state { color: var(--critical-text); }
 /* The value sits beside its own meter, so it is a lone figure: proportional. */
-.meter-pct { font-weight: 620; color: var(--text); font-variant-numeric: proportional-nums; }
+.meter-pct {
+  margin-left: auto;
+  font-size: 14px; font-weight: 650; color: var(--text);
+  font-variant-numeric: proportional-nums;
+}
 .meter.warn .meter-pct { color: var(--warn-text); }
 .meter.full .meter-pct { color: var(--critical-text); }
+
+.meter-foot {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--muted);
+}
+.meter-left { font-weight: 550; color: var(--text-2); }
+.meter-reset { display: inline-flex; align-items: center; gap: .3rem; margin-left: auto; }
+.meter-reset svg { width: 12px; height: 12px; opacity: .8; }
+/* The day is the part you can act on, so it is the part that is set solid. */
+.meter-reset b { font-weight: 620; color: var(--text-2); }
+.meter-reset .dim { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The foot wraps before it drops anything: both halves are information. */
+.meter-foot > * { min-width: 0; }
 
 .meter-track {
   height: 7px; border-radius: var(--r-full); overflow: hidden;
@@ -889,15 +987,21 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 }
 .usage.compact .meter-track { height: 5px; }
 .usage.compact .meter-head { font-size: 11px; }
+.usage.compact .meter-pct { font-size: 12px; }
+.usage.compact .meter-state, .usage.compact .meter-left { display: none; }
+.usage.compact .meter-foot { font-size: 10.5px; }
+.usage.compact .meter-reset { margin-left: 0; }
 
 /* ── chat ───────────────────────────────────────────────────────────── */
 .chat-head {
-  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  display: grid; gap: .3rem;
   margin-bottom: 1.1rem; padding-bottom: .85rem;
   border-bottom: 1px solid var(--line-soft);
 }
-.chat-head h2 { margin: 0; font-size: 1.1rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.chat-title { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.chat-head h2 { margin: 0; font-size: 1.15rem; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .chat-head .meta { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.chat-stats { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .thread { display: grid; gap: 1.5rem; }
 .turn { display: grid; gap: .6rem; }
@@ -994,7 +1098,7 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 }
 .log .l-tool      { color: var(--muted); }
 .log .l-assistant { color: var(--text); }
-.log .l-status    { color: var(--accent-text); }
+.log .l-status    { color: var(--active-text); }
 .log .l-error     { color: var(--critical-text); }
 .log .l-result    { color: var(--good-text); }
 
@@ -1023,27 +1127,62 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 
 .chat-foot { display: grid; justify-items: center; gap: .5rem; padding: .5rem 0 0; }
 
-/* ── examples (new project) ─────────────────────────────────────────── */
+/* ── new project ────────────────────────────────────────────────────── */
 .intro { text-align: center; padding: 1.5rem 0 1.25rem; }
 .intro-art { width: 28px; height: 28px; color: var(--accent); }
-.intro-h { margin: .5rem 0 .3rem; font-size: 1.5rem; }
+.intro-h { margin: .5rem 0 .3rem; font-size: 1.55rem; }
 .intro-p { margin: 0 auto; max-width: 28rem; font-size: 14px; color: var(--muted); }
 
-.example-row { display: grid; gap: .4rem; }
-.example {
-  display: flex; align-items: center; gap: .5rem;
-  padding: .6rem .75rem;
+/* ── suggestions ────────────────────────────────────────────────────── */
+/* Each one is a next step read off your own projects, so it carries the
+   reason it was offered. The glyph is decoration; the reason is the point. */
+.suggest-list { display: grid; gap: .45rem; }
+
+.suggest {
+  display: flex; align-items: center; gap: .65rem;
+  width: 100%;
+  padding: .65rem .7rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-1);
-  font-size: 13.5px; text-align: left; color: var(--text);
+  text-align: left; color: var(--text);
   cursor: pointer;
-  transition: border-color var(--dur-1) ease, transform var(--dur-1) ease;
+  transition: border-color var(--dur-1) ease, transform var(--dur-1) ease,
+              box-shadow var(--dur-1) ease;
 }
-.example:hover { border-color: var(--accent-line); }
-.example:active { transform: scale(.995); }
-.example svg { width: 15px; height: 15px; color: var(--accent); flex: none; }
+.suggest:hover {
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+.suggest:active { transform: none; }
+
+.suggest-icon {
+  display: grid; place-items: center; flex: none;
+  width: 2rem; height: 2rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  color: var(--accent-text);
+}
+.suggest-icon svg { width: 16px; height: 16px; }
+.suggest[data-kind="starter"] .suggest-icon { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
+
+.suggest-text { display: grid; gap: .1rem; min-width: 0; flex: 1; }
+.suggest-title {
+  font-size: 13.5px; font-weight: 570; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.suggest-why {
+  display: flex; align-items: center; gap: .35rem; min-width: 0;
+  font-size: 11.5px; color: var(--muted);
+}
+.suggest-why .tag { flex: none; }
+.why-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggest-go { flex: none; color: var(--muted); }
+.suggest-go svg { width: 16px; height: 16px; }
+.suggest:hover .suggest-go { color: var(--accent-text); }
 
 /* ── toasts, dialog, offline bar ────────────────────────────────────── */
 .toasts {
@@ -1107,9 +1246,77 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 .skel-row { height: 3.1rem; }
 
+/* ── the facts a run was queued with ────────────────────────────────── */
+.msg-facts { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
+.msg-facts:empty { display: none; }
+.fact {
+  padding: .1rem .4rem;
+  background: var(--surface-2);
+  border-radius: var(--r-xs);
+  font-size: 10.5px; font-weight: 550; letter-spacing: .01em;
+  color: var(--muted);
+}
+
+/* ── key/value card (your desktop) ──────────────────────────────────── */
+.info-card { padding: .2rem .85rem .8rem; }
+.info-row {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .55rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+.info-row:last-of-type { border-bottom: 0; }
+.info-k { color: var(--muted); }
+.info-v {
+  margin-left: auto; min-width: 0;
+  font-weight: 550; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.info-v .state { font-size: 10.5px; }
+.info-note { margin: .35rem 0 0; font-size: 11.5px; color: var(--muted); }
+
+/* ── runs per day ───────────────────────────────────────────────────── */
+/* One series, so no legend: the heading names it, today is the only
+   coloured column, and the busiest day is the only one labelled. Marks are
+   capped and separated by surface, never by a stroke. */
+.chart { padding: .85rem .85rem .6rem; }
+
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 4.5rem; }
+.bar-col {
+  display: grid; grid-template-rows: 1rem minmax(0, 1fr);
+  flex: 1 1 0; min-width: 0; max-width: 24px; height: 100%;
+  justify-items: center;
+  margin-inline: auto;
+}
+.bar-val {
+  font-size: 10px; font-weight: 650; color: var(--text-2);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.bar-val.hide { visibility: hidden; }
+.bar-wrap { display: flex; align-items: flex-end; width: 100%; height: 100%; }
+.bar {
+  display: block; width: 100%; min-height: 0;
+  background: var(--bar);
+  border-radius: 4px 4px 1px 1px;
+  transition: height var(--dur-3) var(--ease);
+}
+/* Today is the reading you came for; the rest is context. */
+.bar-col.today .bar { background: var(--active); }
+.bar-col.today .bar-val { color: var(--active-text); }
+
+.chart-foot {
+  display: flex; align-items: center; gap: .5rem;
+  margin-top: .45rem; padding-top: .45rem;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px; color: var(--muted);
+}
+.chart-base { flex: 1; }
+
 /* ── forced colours ─────────────────────────────────────────────────── */
 @media (forced-colors: active) {
-  .card, .row, .tile, .msg.agent, .composer-box, .hero-card { border: 1px solid CanvasText; }
-  .meter-fill { background: Highlight; }
+  .card, .row, .tile, .msg.agent, .composer-box, .hero-card,
+  .suggest, .suggest-icon { border: 1px solid CanvasText; }
+  .meter-fill, .bar { background: Highlight; forced-color-adjust: none; }
+  .bar-col.today .bar { background: CanvasText; }
   .dot { outline: 1px solid CanvasText; }
 }
