@@ -450,7 +450,6 @@ export function renderSuggestions() {
 /** 'all' · 'next' · 'new' · 'theme:<key>'. Set by the chip row. */
 let ideaFilter = 'all';
 export const setIdeaFilter = (key) => { ideaFilter = key; };
-export const ideaFilterKey = () => ideaFilter;
 
 /** Both engines at full length — this is the view that shows everything. */
 const ideaSets = () => {
@@ -469,7 +468,7 @@ const ideaSets = () => {
  */
 const ideaCard = (it) => `
   <button type="button" class="idea" data-suggest="${esc(it.id)}"
-          data-kind="${esc(it.kind)}" data-theme="${esc(it.theme ?? '')}">
+          data-kind="${esc(it.kind)}" data-idea-theme="${esc(it.theme ?? '')}">
     <span class="idea-top">
       <span class="idea-icon">${icon(it.icon)}</span>
       <span class="idea-tag-row">${it.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>
@@ -523,7 +522,13 @@ function profileHtml(read) {
 export function renderIdeas() {
   const { next, builds, read } = ideaSets();
 
-  const theme = ideaFilter.startsWith('theme:') ? ideaFilter.slice(6) : null;
+  // The filter outlives the render that set it, and the account moves under
+  // it — a theme that no longer has ideas would leave the page blank.
+  let theme = ideaFilter.startsWith('theme:') ? ideaFilter.slice(6) : null;
+  if (theme && !builds.some((b) => b.theme === theme)) {
+    ideaFilter = 'all';
+    theme = null;
+  }
   const showNext = ideaFilter === 'all' || ideaFilter === 'next';
   const shownBuilds = theme ? builds.filter((b) => b.theme === theme)
     : ideaFilter === 'next' ? []
