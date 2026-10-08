@@ -27,6 +27,10 @@ export const state = {
   /** jobId -> event rows */ events: new Map(),
   projects: [],
   usage: [],
+  /** When the last usage read landed, and when its numbers last moved. */
+  usageAt: null,
+  usageMovedAt: null,
+  usageError: null,
   host: null,
   hostFresh: false,
   realtime: 'connecting',
@@ -83,7 +87,7 @@ export async function loadAll(openSlug = null) {
   state.jobs.clear();
   for (const j of jobRes.data ?? []) state.jobs.set(j.id, j);
   state.projects = projRes.data ?? [];
-  state.usage = useRes.data ?? [];
+  takeUsage(useRes);
 
   const ids = (jobRes.data ?? [])
     .filter((j) => isActive(j) || j.project_slug === openSlug)
@@ -96,6 +100,45 @@ export async function loadAll(openSlug = null) {
   }
 
   state.loading = false;
+  changed();
+}
+
+// ── usage ─────────────────────────────────────────────────────────────
+// The one table nothing in this app writes to: the runner posts a reading
+// when it starts and again as each job burns through a window. Realtime on
+// it is a bonus, not a guarantee — the table has to be in the publication
+// for that — so it is polled as well. It used to be, and when the poll was
+// dropped the meters silently froze on whatever the first load happened to
+// see, which looks exactly like a broken feature.
+
+const fingerprint = (rows) => rows
+  .map((r) => `${r.window_type}:${r.pct}:${r.resets_at}`)
+  .sort()
+  .join('|');
+
+/**
+ * Accept one usage read. A failed read keeps the last good rows rather than
+ * blanking the block — an empty meter list and a query that errored mean very
+ * different things, and only one of them is "no readings yet".
+ */
+function takeUsage({ data, error }) {
+  if (error) {
+    state.usageError = error.message ?? String(error);
+    return;
+  }
+  const rows = data ?? [];
+  // Only a change we actually watched happen counts. The first read tells us
+  // nothing about when the numbers last moved, so it claims nothing.
+  const moved = state.usageAt && fingerprint(rows) !== fingerprint(state.usage);
+  state.usage = rows;
+  state.usageAt = new Date().toISOString();
+  state.usageError = null;
+  if (moved) state.usageMovedAt = state.usageAt;
+}
+
+/** Re-read the limits. Cheap — one small table — so it runs on a timer. */
+export async function pollUsage() {
+  takeUsage(await sb.from('usage_windows').select('*'));
   changed();
 }
 
@@ -168,12 +211,11 @@ export function subscribe() {
         })
       .subscribe(),
 
+    // A reading can change without a row event reaching us, so this is the
+    // fast path and `pollUsage` on a timer is the one that has to be right.
     sb.channel('usage-feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'usage_windows' }, async () => {
-        const { data } = await sb.from('usage_windows').select('*');
-        state.usage = data ?? [];
-        changed();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'usage_windows' },
+        () => { pollUsage(); })
       .subscribe(),
   );
 }

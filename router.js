@@ -1,8 +1,9 @@
-// Hash routing. Four places to be:
+// Hash routing. Five places to be:
 //   #/            home
 //   #/p/<slug>    one project's chat
 //   #/j/<id>      a brand-new job, until the host names its project
 //   #/new         start a project
+//   #/ideas       everything worth building next, read off your own work
 
 /** Mutated in place so importers always see the current route. */
 export const route = { view: 'home', slug: null, jobId: null };
@@ -12,6 +13,7 @@ export function readHash() {
   if (h.startsWith('p/')) return { view: 'project', slug: decodeURIComponent(h.slice(2)), jobId: null };
   if (h.startsWith('j/')) return { view: 'pending', slug: null, jobId: h.slice(2) };
   if (h === 'new') return { view: 'new', slug: null, jobId: null };
+  if (h === 'ideas') return { view: 'ideas', slug: null, jobId: null };
   return { view: 'home', slug: null, jobId: null };
 }
 
