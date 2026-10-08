@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101014" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Queue coding jobs to your desktop from anywhere.">
 <title>claude-remote</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -131,6 +131,12 @@
         <span id="view-sub" class="tb-sub"></span>
       </div>
 
+      <button id="usage-pill" class="pill" type="button" hidden
+              aria-label="Usage limits">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gauge"/></svg>
+        <span id="usage-pill-text">—</span>
+      </button>
+
       <button id="host-badge" class="pill" type="button">
         <i class="dot"></i><span id="host-name">checking…</span>
       </button>
@@ -146,6 +152,7 @@
           <p id="hero-value" class="hero-figure">0</p>
           <p id="hero-label" class="hero-label">agents running</p>
           <div id="hero-chips" class="chip-row"></div>
+          <p id="hero-now" class="hero-now" hidden></p>
         </div>
 
         <section id="active-block" class="block" hidden>
@@ -154,11 +161,22 @@
         </section>
 
         <section id="usage-block" class="block">
-          <h2 class="block-h"><span>Usage</span></h2>
+          <h2 class="block-h">
+            <span>Limits</span>
+            <span id="usage-note" class="block-note"></span>
+          </h2>
           <div id="usage-home" class="usage card"></div>
           <p id="usage-empty" class="empty-note" hidden>
             No readings yet — your desktop reports these when it starts up.
           </p>
+        </section>
+
+        <section id="suggest-block" class="block" hidden>
+          <h2 class="block-h">
+            <span>What next</span>
+            <span id="suggest-note" class="block-note"></span>
+          </h2>
+          <div id="suggest-list" class="suggest-list"></div>
         </section>
 
         <section id="glance-block" class="block">
@@ -167,21 +185,42 @@
             <div class="tile">
               <p class="tile-label">Projects</p>
               <p id="kpi-projects" class="tile-value">—</p>
+              <p id="kpi-projects-note" class="tile-note"></p>
             </div>
             <div class="tile">
               <p class="tile-label">Finished</p>
               <p id="kpi-done" class="tile-value">—</p>
+              <p id="kpi-done-note" class="tile-note"></p>
             </div>
             <div class="tile">
               <p class="tile-label">Needs a look</p>
               <p id="kpi-failed" class="tile-value">—</p>
+              <p id="kpi-failed-note" class="tile-note"></p>
+            </div>
+            <div class="tile">
+              <p class="tile-label">First-try rate</p>
+              <p id="kpi-rate" class="tile-value">—</p>
+              <p id="kpi-rate-note" class="tile-note"></p>
             </div>
           </div>
+        </section>
+
+        <section id="activity-block" class="block" hidden>
+          <h2 class="block-h">
+            <span>Last 14 days</span>
+            <span id="activity-note" class="block-note"></span>
+          </h2>
+          <div id="activity" class="card chart"></div>
         </section>
 
         <section id="recent-block" class="block" hidden>
           <h2 class="block-h"><span>Recently finished</span></h2>
           <div id="recent-list" class="stack"></div>
+        </section>
+
+        <section id="desktop-block" class="block">
+          <h2 class="block-h"><span>Your desktop</span></h2>
+          <div id="desktop-card" class="card info-card"></div>
         </section>
 
         <div id="home-empty" class="empty" hidden>
@@ -212,8 +251,11 @@
              creates the repo, writes the code, and pushes it.</p>
         </div>
         <div class="block">
-          <h2 class="block-h"><span>Try one of these</span></h2>
-          <div id="example-row" class="example-row"></div>
+          <h2 class="block-h">
+            <span>Picked for you</span>
+            <span id="suggest-new-note" class="block-note"></span>
+          </h2>
+          <div id="suggest-new" class="suggest-list"></div>
         </div>
         <div id="usage-new" class="usage card" hidden></div>
       </section>
@@ -311,6 +353,7 @@
     <g id="i-send"><path d="M12 19.5V5m0 0l-6 6m6-6l6 6"/></g>
     <g id="i-sliders"><path d="M4 8h9m5 0h2M4 16h3m5 0h8"/><circle cx="15.5" cy="8" r="2.3"/><circle cx="9.5" cy="16" r="2.3"/></g>
     <g id="i-down"><path d="M12 5v14m0 0l-6-6m6 6l6-6"/></g>
+    <g id="i-arrow"><path d="M5 12h13m0 0l-5-5m5 5l-5 5"/></g>
     <g id="i-copy"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15.5 6.5A2.5 2.5 0 0013 4H6.5A2.5 2.5 0 004 6.5V13a2.5 2.5 0 002.5 2.5"/></g>
     <g id="i-link"><path d="M14 4.5h5.5V10M19.5 4.5l-8 8M17 14v4.5A1.5 1.5 0 0115.5 20h-10A1.5 1.5 0 014 18.5v-10A1.5 1.5 0 015.5 7H10"/></g>
     <g id="i-stop"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></g>
@@ -325,6 +368,20 @@
     <g id="i-check"><path d="M5 13l4.5 4.5L19 7"/></g>
     <g id="i-bell"><path d="M18 9a6 6 0 10-12 0c0 5-2 6.5-2 6.5h16S18 14 18 9M13.7 19a2 2 0 01-3.4 0"/></g>
     <g id="i-bell-off"><path d="M3 3l18 18M8.6 4.9A6 6 0 0118 9c0 1.9.3 3.3.7 4.3M5.9 7.6A6 6 0 006 9c0 5-2 6.5-2 6.5h12M13.7 19a2 2 0 01-3.4 0"/></g>
+    <!-- state & measurement -->
+    <g id="i-gauge"><path d="M4.5 17a7.5 7.5 0 1115 0"/><path d="M12 17l4-4.8"/><circle cx="12" cy="17" r="1.3"/></g>
+    <g id="i-clock"><circle cx="12" cy="12" r="8"/><path d="M12 7.6V12l3.2 2"/></g>
+    <g id="i-calendar"><rect x="4" y="5.5" width="16" height="15" rx="2.2"/><path d="M4 10.5h16M9 3.5v4M15 3.5v4"/></g>
+    <g id="i-pulse"><path d="M3 13.5h4L9.5 6l3 12 2.5-4.5h6"/></g>
+    <g id="i-desktop"><rect x="3" y="4.5" width="18" height="12" rx="2.2"/><path d="M9 20.5h6M12 16.5v4"/></g>
+    <!-- suggestions -->
+    <g id="i-wrench"><path d="M15.4 4.3a4.3 4.3 0 00-5.6 5.6L4 15.7V20h4.3l5.8-5.8a4.3 4.3 0 005.6-5.6l-2.5 2.5-2.6-.7-.7-2.6z"/></g>
+    <g id="i-upload"><path d="M12 16.5V4m0 0L7.2 8.8M12 4l4.8 4.8M4.5 20h15"/></g>
+    <g id="i-doc"><path d="M7.5 3.5h6l4 4V19a1.5 1.5 0 01-1.5 1.5h-8.5A1.5 1.5 0 016 19V5a1.5 1.5 0 011.5-1.5z"/><path d="M13.4 3.6V8h4M9 13h6M9 16.5h4"/></g>
+    <g id="i-beaker"><path d="M9.5 3.5h5M10.3 3.5v5.3l-4.4 8.6A1.9 1.9 0 007.6 20.2h8.8a1.9 1.9 0 001.7-2.8l-4.4-8.6V3.5"/><path d="M7.6 14.5h8.8"/></g>
+    <g id="i-flow"><path d="M20 12a8 8 0 11-3.1-6.3M20 4.5V9h-4.5"/><path d="M8.6 12.4l2.6 2.6 4.4-5"/></g>
+    <g id="i-rocket"><path d="M12 3.4c3 2.2 4.6 5.3 4.6 8.9l-2.4 3h-4.4l-2.4-3C7.4 8.7 9 5.6 12 3.4z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.8 18l-2 2.6M14.2 18l2 2.6"/></g>
+    <g id="i-wand"><path d="M4.5 19.5L14.5 9.5"/><path d="M17.6 3.4l.9 2.2 2.2.9-2.2.9-.9 2.2-.9-2.2-2.2-.9 2.2-.9z"/></g>
   </defs>
 </svg>
 

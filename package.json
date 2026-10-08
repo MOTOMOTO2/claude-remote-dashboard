@@ -5,7 +5,8 @@
   "description": "Mobile-first dashboard for queueing coding jobs to your desktop",
   "type": "module",
   "scripts": {
-    "test": "node --import ./test/register.mjs test/smoke.mjs",
+    "test": "node tools/contrast.mjs && node --import ./test/register.mjs test/smoke.mjs",
+    "contrast": "node tools/contrast.mjs",
     "serve": "node tools/serve.mjs",
     "preview": "node --import ./test/register.mjs tools/preview.mjs"
   },

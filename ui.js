@@ -1,7 +1,7 @@
 // Chrome that isn't the data: theme, drawer, toasts, confirm dialog, the
 // one-second ticker that keeps relative times honest.
 
-import { $, esc, ago, elapsed } from './util.js';
+import { $, esc, ago, elapsed, until } from './util.js';
 
 // ── icons ─────────────────────────────────────────────────────────────
 /** Reference into the sprite in index.html. */
@@ -11,7 +11,7 @@ export const icon = (name, cls = '') =>
 // ── theme ─────────────────────────────────────────────────────────────
 
 const THEME_KEY = 'cr-theme';
-const CHROME = { light: '#faf9f6', dark: '#121211' };
+const CHROME = { light: '#f7f7fb', dark: '#101014' };
 
 const systemDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
 
@@ -157,9 +157,9 @@ export function ask({ title, body = '', confirm = 'Confirm', danger = false }) {
 // ── ticker ────────────────────────────────────────────────────────────
 
 /**
- * One interval for the whole page. Any element carrying `data-elapsed` or
- * `data-ago` gets its text refreshed, so nothing has to re-render just to
- * move a clock forward.
+ * One interval for the whole page. Any element carrying `data-elapsed`,
+ * `data-ago` or `data-until` gets its text refreshed, so nothing has to
+ * re-render just to move a clock forward.
  */
 export function startTicker() {
   const beat = () => {
@@ -168,6 +168,9 @@ export function startTicker() {
     }
     for (const el of document.querySelectorAll('[data-ago]')) {
       el.textContent = ago(el.dataset.ago);
+    }
+    for (const el of document.querySelectorAll('[data-until]')) {
+      el.textContent = until(el.dataset.until);
     }
   };
   beat();

@@ -1,10 +1,14 @@
 // Rendering. Every function here reads `state` and writes DOM — no queries,
 // no fetches. Called whenever the store says something changed.
 
-import { $, esc, ago, elapsed, clock, when, stamp, plural, clip, firstLine } from './util.js';
+import {
+  $, esc, ago, elapsed, dayClock, until, when, stamp, plural, clip,
+  firstLine, dayKey, weekday,
+} from './util.js';
 import { md } from './md.js';
 import { icon, setBadge } from './ui.js';
 import { route, projectHref } from './router.js';
+import { suggest } from './suggest.js';
 import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
   projectOf, projectGone, eventsOf, lastActivity, resultOf,
@@ -33,7 +37,8 @@ function subtitle(job) {
 
 function timing(job) {
   if (job.status === 'paused') {
-    return job.resume_at ? `resumes ${clock(job.resume_at)}` : 'waiting';
+    // A resume can land tomorrow, so it has to name the day, not just a clock.
+    return job.resume_at ? `resumes ${dayClock(job.resume_at)}` : 'waiting';
   }
   if (job.status === 'queued') return 'waiting for desktop';
   if (job.status === 'running') {
@@ -45,6 +50,18 @@ function timing(job) {
 
 const jobHref = (job) =>
   (job.project_slug ? projectHref(job.project_slug) : `#/j/${encodeURIComponent(job.id)}`);
+
+/** The settings a run was queued with — small, but it answers "why so slow?". */
+function jobFacts(job) {
+  const facts = [
+    job.effort ? `${job.effort} effort` : '',
+    job.usage_cap_pct != null && job.usage_cap_pct < 100 ? `pauses at ${job.usage_cap_pct}%` : '',
+    job.num_turns ? plural(job.num_turns, 'turn') : '',
+    job.repo_visibility && job.repo_visibility !== 'none' && !job.project_slug
+      ? `${job.repo_visibility} repo` : '',
+  ].filter(Boolean);
+  return facts.map((f) => `<span class="fact">${esc(f)}</span>`).join('');
+}
 
 const jobRow = (job) => `
   <a class="row${job.status === 'running' ? ' live' : ''}" data-status="${esc(job.status)}"
@@ -176,7 +193,43 @@ const WINDOW_LABEL = {
   seven_day_overage_included: 'Week · incl. overage',
   overage: 'Overage',
 };
+const WINDOW_SHORT = {
+  five_hour: '5h', seven_day: 'week', seven_day_opus: 'week · Opus',
+  seven_day_sonnet: 'week · Sonnet', seven_day_overage_included: 'week+',
+  overage: 'overage',
+};
 const WINDOW_ORDER = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
+
+/** The severity of a ratio, as a class and the word that always rides with it. */
+const level = (pct) => (pct >= 85
+  ? { tone: 'full', word: 'nearly out' }
+  : pct >= 60 ? { tone: 'warn', word: 'watch' } : { tone: '', word: 'healthy' });
+
+const usageRows = () => state.usage
+  .filter((r) => r.pct != null)
+  .sort((a, b) => {
+    const ai = WINDOW_ORDER.indexOf(a.window_type);
+    const bi = WINDOW_ORDER.indexOf(b.window_type);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+
+/** The window with the least headroom — the one that will actually stop you. */
+const tightest = () => usageRows().reduce(
+  (worst, r) => (worst && Number(worst.pct) >= Number(r.pct) ? worst : r), null);
+
+const future = (iso) => Boolean(iso) && new Date(iso) > new Date();
+
+/**
+ * When a window resets, in words: the day comes first because "resets 3:00 PM"
+ * on a weekly limit is the one thing you cannot act on. The countdown ticks.
+ */
+function resetHtml(r) {
+  if (!future(r.resets_at)) return '<span class="meter-reset muted">reset time unknown</span>';
+  return `<span class="meter-reset">
+    ${icon('calendar')}resets <b>${esc(dayClock(r.resets_at))}</b>
+    <span class="dim">· in <span data-until="${esc(r.resets_at)}">${esc(until(r.resets_at))}</span></span>
+  </span>`;
+}
 
 /**
  * A ratio against a limit is a meter, not a chart. The fill carries severity
@@ -184,31 +237,38 @@ const WINDOW_ORDER = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_son
  * the whole bar — and the percentage is always written out beside it.
  */
 function usageHtml() {
-  const rows = state.usage
-    .filter((r) => r.pct != null)
-    .sort((a, b) => {
-      const ai = WINDOW_ORDER.indexOf(a.window_type);
-      const bi = WINDOW_ORDER.indexOf(b.window_type);
-      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-    });
-
-  return rows.map((r) => {
+  return usageRows().map((r) => {
     const pct = Math.max(0, Number(r.pct));
-    const tone = pct >= 85 ? 'full' : pct >= 60 ? 'warn' : '';
-    const resets = r.resets_at && new Date(r.resets_at) > new Date()
-      ? `resets ${clock(r.resets_at)}` : '';
+    const { tone, word } = level(pct);
+    const left = Math.max(0, 100 - Math.round(pct));
     return `
       <div class="meter ${tone}">
         <div class="meter-head">
           <span class="meter-name">${esc(WINDOW_LABEL[r.window_type] ?? r.window_type)}</span>
+          <span class="meter-state"><i class="dot"></i>${esc(word)}</span>
           <span class="meter-pct">${pct.toFixed(0)}%</span>
-          <span class="meter-reset">${esc(resets)}</span>
         </div>
         <div class="meter-track">
           <i class="meter-fill" style="width:${Math.min(100, pct)}%"></i>
         </div>
+        <div class="meter-foot">
+          <span class="meter-left">${left}% left</span>
+          ${resetHtml(r)}
+        </div>
       </div>`;
   }).join('');
+}
+
+/** One sentence a person can act on, used by the block note and the pill. */
+export function usageSentence() {
+  const r = tightest();
+  if (!r) return 'No usage readings yet — your desktop reports these when it starts up.';
+  const pct = Math.round(Number(r.pct));
+  const name = WINDOW_LABEL[r.window_type] ?? r.window_type;
+  const reset = future(r.resets_at)
+    ? ` It resets ${dayClock(r.resets_at)}, in ${until(r.resets_at)}.`
+    : '';
+  return `${name} is your tightest window: ${100 - pct}% left.${reset}`;
 }
 
 export function renderUsage() {
@@ -221,9 +281,134 @@ export function renderUsage() {
   // Home already leads with these; no need to print them twice.
   $('usage-side').hidden = !inner || route.view === 'home';
   $('usage-empty').hidden = Boolean(inner);
+
+  const r = tightest();
+  $('usage-note').textContent = r
+    ? `${Math.max(0, 100 - Math.round(Number(r.pct)))}% left on ${
+      WINDOW_SHORT[r.window_type] ?? r.window_type}`
+    : '';
+
+  const pill = $('usage-pill');
+  pill.hidden = !r;
+  if (r) {
+    const pct = Math.round(Number(r.pct));
+    const { tone, word } = level(pct);
+    pill.classList.remove('warn', 'full');
+    if (tone) pill.classList.add(tone);
+    pill.title = usageSentence();
+    pill.setAttribute('aria-label', usageSentence());
+    $('usage-pill-text').innerHTML = `${pct}%<span class="pill-sub"> ${
+      esc(WINDOW_SHORT[r.window_type] ?? '')}</span>`;
+    pill.dataset.word = word;
+  }
+}
+
+// ── activity (runs per day) ───────────────────────────────────────────
+
+const DAYS = 14;
+
+/**
+ * Fourteen columns, one per day, counting the runs you started. One series, so
+ * no legend: the heading names it and today's column is the only coloured one.
+ * The busiest day is labelled directly; the rest live in the hover title.
+ */
+function activityHtml(jobs) {
+  const now = new Date();
+  const days = [];
+  for (let i = DAYS - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    days.push({ date: d, key: dayKey(d), n: 0 });
+  }
+  const index = new Map(days.map((d) => [d.key, d]));
+  for (const j of jobs) {
+    const day = index.get(dayKey(j.created_at));
+    if (day) day.n++;
+  }
+
+  const max = Math.max(1, ...days.map((d) => d.n));
+  const peak = days.reduce((best, d) => (d.n > best.n ? d : best), days[0]);
+  const total = days.reduce((sum, d) => sum + d.n, 0);
+
+  const label = (d) => `${weekday(d.date)} ${d.date.toLocaleDateString([], {
+    month: 'short', day: 'numeric' })} · ${plural(d.n, 'run')}`;
+
+  const cols = days.map((d, i) => {
+    const today = i === DAYS - 1;
+    const show = d.n > 0 && d === peak && d.n > 1;
+    return `
+      <div class="bar-col${today ? ' today' : ''}" title="${esc(label(d))}"
+           role="img" aria-label="${esc(label(d))}">
+        <span class="bar-val${show ? '' : ' hide'}">${d.n}</span>
+        <span class="bar-wrap"><i class="bar" style="height:${
+          d.n ? Math.max(6, Math.round((d.n / max) * 100)) : 0}%"></i></span>
+      </div>`;
+  }).join('');
+
+  return {
+    total,
+    peak,
+    html: `
+      <div class="bars">${cols}</div>
+      <div class="chart-foot">
+        <span>${esc(days[0].date.toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>
+        <span class="chart-base" aria-hidden="true"></span>
+        <span>today</span>
+      </div>`,
+  };
+}
+
+// ── suggestions ───────────────────────────────────────────────────────
+
+/** Rendered suggestions by id, so a click can find the prompt again. */
+const shown = new Map();
+export const suggestionById = (id) => shown.get(id) ?? null;
+
+function suggestionList() {
+  const summaries = new Map();
+  for (const j of jobList()) {
+    const r = resultOf(j.id);
+    if (r) summaries.set(j.id, r.text);
+  }
+  return suggest({ jobs: jobList(), projects: state.projects, summaries, limit: 6 });
+}
+
+const suggestionHtml = (s) => `
+  <button type="button" class="suggest" data-suggest="${esc(s.id)}" data-kind="${esc(s.kind)}">
+    <span class="suggest-icon">${icon(s.icon)}</span>
+    <span class="suggest-text">
+      <span class="suggest-title">${esc(s.title)}</span>
+      <span class="suggest-why">
+        ${s.slug ? `<span class="tag plain">${esc(s.slug)}</span>` : ''}
+        <span class="why-text">${esc(s.why)}</span>
+      </span>
+    </span>
+    <span class="suggest-go">${icon('arrow')}</span>
+  </button>`;
+
+export function renderSuggestions() {
+  const all = suggestionList();
+  shown.clear();
+  for (const s of all) shown.set(s.id, s);
+
+  const fromYours = all.filter((s) => s.kind !== 'starter').length;
+  const note = fromYours
+    ? `${fromYours} from your ${plural(new Set(all.filter((s) => s.slug).map((s) => s.slug)).size,
+      'project')}`
+    : 'ideas to get you started';
+
+  const home = all.slice(0, 3);
+  $('suggest-list').innerHTML = home.map(suggestionHtml).join('');
+  $('suggest-block').hidden = !home.length;
+  $('suggest-note').textContent = note;
+
+  $('suggest-new').innerHTML = all.map(suggestionHtml).join('');
+  $('suggest-new-note').textContent = note;
 }
 
 // ── home ──────────────────────────────────────────────────────────────
+
+const pct = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : '—');
 
 export function renderHome() {
   const all = jobList();
@@ -238,7 +423,8 @@ export function renderHome() {
   $('home-empty').hidden = !bare;
   // On a brand-new account the empty state is the whole page — a big zero
   // above it is noise.
-  for (const id of ['hero-card', 'active-block', 'usage-block', 'glance-block', 'recent-block']) {
+  for (const id of ['hero-card', 'active-block', 'usage-block', 'glance-block',
+    'recent-block', 'activity-block', 'desktop-block', 'suggest-block']) {
     $(id).hidden = bare;
   }
 
@@ -246,6 +432,15 @@ export function renderHome() {
   $('hero-value').textContent = String(running.length);
   $('hero-label').textContent = running.length === 1 ? 'agent running' : 'agents running';
   $('hero-eyebrow').textContent = state.loading ? 'Loading…' : 'Right now';
+
+  // The hero says how many; this line says what, which is the part you want.
+  const lead = running[0];
+  const act = lead ? lastActivity(lead.id) : null;
+  $('hero-now').hidden = bare || !lead;
+  if (lead) {
+    $('hero-now').innerHTML = `${icon('pulse')}<span><b>${esc(lead.project_slug ?? 'naming…')}</b>
+      — ${esc(clip(act ? act.text : lead.prompt, 90))}</span>`;
+  }
 
   const chip = (status, text) => `
     <span class="stat-chip" data-status="${esc(status)}"><i class="dot"></i>${text}</span>`;
@@ -266,15 +461,61 @@ export function renderHome() {
     ? '<div class="skel skel-row"></div>'
     : active.map(jobRow).join('');
 
-  $('kpi-projects').textContent = String(state.projects.length || new Set(
-    all.map((j) => j.project_slug).filter(Boolean)).size);
+  const slugs = new Set(all.map((j) => j.project_slug).filter(Boolean));
+  const turns = finished.reduce((sum, j) => sum + (Number(j.num_turns) || 0), 0);
+  const settled = finished.length + failed.length;
+
+  $('kpi-projects').textContent = String(state.projects.length || slugs.size);
+  $('kpi-projects-note').textContent = slugs.size
+    ? `${slugs.size} worked on so far` : 'none run yet';
   $('kpi-done').textContent = String(finished.length);
+  $('kpi-done-note').textContent = turns ? `${plural(turns, 'turn')} of work` : '';
   $('kpi-failed').textContent = String(failed.length);
+  $('kpi-failed-note').textContent = failed.length
+    ? 'open one to retry' : 'nothing broken';
   $('kpi-failed').closest('.tile').classList.toggle('flag', failed.length > 0);
+  $('kpi-rate').textContent = pct(finished.length, settled);
+  $('kpi-rate-note').textContent = settled ? `of ${plural(settled, 'finished run')}` : 'no runs yet';
+
+  const strip = activityHtml(all);
+  $('activity-block').hidden = bare || !all.length;
+  $('activity').innerHTML = strip.html;
+  $('activity-note').textContent = strip.total
+    ? `${plural(strip.total, 'run')} · busiest ${weekday(strip.peak.date)} (${strip.peak.n})`
+    : 'nothing started yet';
 
   const recent = all.filter((j) => !isActive(j)).sort(newest).slice(0, 5);
   $('recent-block').hidden = bare || !recent.length;
   $('recent-list').innerHTML = recent.map(jobRow).join('');
+
+  $('desktop-card').innerHTML = desktopHtml();
+}
+
+/** The runner on your PC, spelled out — the pill only has room for a word. */
+function desktopHtml() {
+  const { host, hostFresh, realtime } = state;
+  const feed = { live: 'live', error: 'reconnecting', connecting: 'connecting' }[realtime]
+    ?? realtime;
+  const rows = [
+    ['Desktop', host ? esc(host.name) : 'none has checked in'],
+    ['State', host
+      ? `<span class="state" data-status="${hostFresh ? 'done' : 'queued'}">
+           <i class="dot${hostFresh ? ' live' : ''}"></i>${hostFresh ? 'online' : 'offline'}</span>`
+      : `<span class="state" data-status="error"><i class="dot"></i>never seen</span>`],
+    ['Last checked in', host
+      ? `<span data-ago="${esc(host.last_seen)}">${ago(host.last_seen)}</span> ago`
+      : '—'],
+    ['Live updates', `<span class="state" data-status="${realtime === 'live' ? 'done' : 'paused'}">
+       <i class="dot"></i>${esc(feed)}</span>`],
+  ];
+  const note = !host
+    ? 'Start the runner on your PC and it will claim queued jobs.'
+    : hostFresh ? 'Anything you send starts right away.'
+      : 'Jobs you send will sit in the queue until it boots.';
+
+  return rows.map(([k, v]) => `
+    <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
+    .join('') + `<p class="info-note">${esc(note)}</p>`;
 }
 
 // ── project chat ──────────────────────────────────────────────────────
@@ -292,14 +533,13 @@ function replyHtml(job) {
     ? `<span class="msg-clock" data-elapsed="${esc(job.claimed_at ?? job.created_at)}">${
         elapsed(job.claimed_at ?? job.created_at)}</span>`
     : job.status === 'paused' && job.resume_at
-      ? `<span class="msg-clock">resumes ${esc(clock(job.resume_at))}</span>`
-      : job.num_turns
-        ? `<span class="msg-clock">${job.num_turns} turns</span>`
-        : `<span class="msg-clock">${esc(when(job.created_at))}</span>`;
+      ? `<span class="msg-clock">resumes ${esc(dayClock(job.resume_at))}</span>`
+      : `<span class="msg-clock">${esc(when(job.created_at))}</span>`;
 
   const paused = job.status === 'paused' ? `
     <p class="note" data-status="paused">Usage limit reached. This picks up
-      automatically where it left off${job.resume_at ? ` at ${esc(clock(job.resume_at))}` : ''}
+      automatically where it left off${job.resume_at
+        ? ` ${esc(dayClock(job.resume_at))} — in ${esc(until(job.resume_at))}` : ''}
       — nothing for you to do.</p>` : '';
 
   const body = result
@@ -330,15 +570,37 @@ function replyHtml(job) {
                ${icon('retry')}run again</button>` : '',
   ].filter(Boolean).join('');
 
+  const facts = jobFacts(job);
+
   return `
     <div class="msg agent${live ? ' live' : ''}" data-status="${esc(job.status)}">
       <div class="msg-head">${stateTag(job.status, job.status === 'running')}${trailer}</div>
+      ${facts ? `<div class="msg-facts">${facts}</div>` : ''}
       ${paused}
       ${body}
       ${logBlock}
       ${job.error ? `<p class="note bad" data-status="error">${esc(job.error)}</p>` : ''}
       <div class="msg-actions">${actions}</div>
     </div>`;
+}
+
+/** Everything that has happened to one project, in one line. */
+function chatStats(mine) {
+  if (!mine.length) return '';
+  const done = mine.filter((j) => j.status === 'done').length;
+  const failed = mine.filter((j) => j.status === 'error').length;
+  const open = mine.filter(isActive).length;
+  const turns = mine.reduce((sum, j) => sum + (Number(j.num_turns) || 0), 0);
+  const last = mine.at(-1);
+  const bits = [
+    plural(mine.length, 'run'),
+    done ? `${done} done` : '',
+    failed ? `${failed} failed` : '',
+    open ? `${open} open` : '',
+    turns ? plural(turns, 'turn') : '',
+  ].filter(Boolean);
+  return `<span class="chat-stats">${bits.map((b) => esc(b)).join(' · ')}
+    · last <span data-ago="${esc(last.created_at)}">${ago(last.created_at)}</span> ago</span>`;
 }
 
 export function renderChat() {
@@ -350,16 +612,19 @@ export function renderChat() {
 
   $('chat-head').hidden = false;
   $('chat-head').innerHTML = `
-    <h2>${esc(slug)}</h2>
-    <span class="meta">
-      ${p?.private ? '<span class="tag">private</span>' : ''}
-      ${p?.is_local && !p?.full_name ? '<span class="tag">local</span>' : ''}
-      ${gone ? '<span class="tag gone">gone</span>' : ''}
-      ${repo ? `<a class="btn tiny ghost" href="${esc(repo)}" target="_blank" rel="noopener">
-                  ${icon('link')}repo</a>` : ''}
-      ${mine.length ? `<button class="btn tiny ghost" data-delete-chat="${esc(slug)}">
-                         ${icon('trash')}clear chat</button>` : ''}
-    </span>`;
+    <div class="chat-title">
+      <h2>${esc(slug)}</h2>
+      <span class="meta">
+        ${p?.private ? '<span class="tag">private</span>' : ''}
+        ${p?.is_local && !p?.full_name ? '<span class="tag">local</span>' : ''}
+        ${gone ? '<span class="tag gone">gone</span>' : ''}
+        ${repo ? `<a class="btn tiny ghost" href="${esc(repo)}" target="_blank" rel="noopener">
+                    ${icon('link')}repo</a>` : ''}
+        ${mine.length ? `<button class="btn tiny ghost" data-delete-chat="${esc(slug)}">
+                           ${icon('trash')}clear chat</button>` : ''}
+      </span>
+    </div>
+    ${chatStats(mine)}`;
 
   // Keep the reading position of any log the user has scrolled into.
   const scrolls = new Map();
@@ -413,22 +678,6 @@ export function appendLive(ev, onRerender) {
     const now = el.closest('.msg')?.querySelector('.msg-now span');
     if (now) now.textContent = clip(ev.text, 140);
   }
-}
-
-// ── new project ───────────────────────────────────────────────────────
-
-const EXAMPLES = [
-  'Build a snake game I can play in the browser, with a high-score list.',
-  'A CLI that watches a folder and converts any new image to WebP.',
-  'A small REST API for tracking books I have read, with SQLite behind it.',
-  'A static site that shows the weather for my city, deployed to GitHub Pages.',
-];
-
-export function renderExamples() {
-  $('example-row').innerHTML = EXAMPLES.map((text) => `
-    <button type="button" class="example" data-example="${esc(text)}">
-      ${icon('spark')}<span>${esc(text)}</span>
-    </button>`).join('');
 }
 
 // ── pending (a job with no project name yet) ──────────────────────────
