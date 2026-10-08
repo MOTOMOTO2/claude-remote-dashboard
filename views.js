@@ -9,6 +9,7 @@ import { md } from './md.js';
 import { icon, setBadge } from './ui.js';
 import { route, projectHref } from './router.js';
 import { suggest } from './suggest.js';
+import { ideas, profile, themeLabel } from './ideas.js';
 import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
   projectOf, projectGone, eventsOf, lastActivity, resultOf,
@@ -82,6 +83,7 @@ export function renderTopbar() {
     project: route.slug ?? '',
     pending: 'Starting…',
     new: 'New project',
+    ideas: 'Ideas',
   };
   $('view-title').textContent = titles[route.view] ?? '';
 
@@ -99,6 +101,8 @@ export function renderTopbar() {
     ].filter(Boolean).join(' · ');
   } else if (route.view === 'pending') {
     sub = 'waiting for your desktop to name it';
+  } else if (route.view === 'ideas') {
+    sub = 'read off your own work';
   }
   $('view-sub').textContent = sub;
 
@@ -261,6 +265,7 @@ function usageHtml() {
 
 /** One sentence a person can act on, used by the block note and the pill. */
 export function usageSentence() {
+  if (state.usageError) return `Couldn’t read your limits — ${state.usageError}`;
   const r = tightest();
   if (!r) return 'No usage readings yet — your desktop reports these when it starts up.';
   const pct = Math.round(Number(r.pct));
@@ -268,7 +273,27 @@ export function usageSentence() {
   const reset = future(r.resets_at)
     ? ` It resets ${dayClock(r.resets_at)}, in ${until(r.resets_at)}.`
     : '';
-  return `${name} is your tightest window: ${100 - pct}% left.${reset}`;
+  const read = state.usageAt ? ` Read ${ago(state.usageAt)} ago.` : '';
+  return `${name} is your tightest window: ${100 - pct}% left.${reset}${read}`;
+}
+
+/**
+ * Whether the readings are arriving, in words. A meter that is stuck is
+ * indistinguishable from a quiet account unless the page says which it is:
+ * when the last read landed, and when its numbers last actually moved.
+ */
+function freshnessHtml() {
+  if (state.usageError) {
+    return `<span class="usage-read bad">${icon('offline')}couldn’t read the limits —
+      ${esc(clip(state.usageError, 80))}</span>`;
+  }
+  if (!state.usageAt) return '<span class="usage-read">no reading yet</span>';
+  // No trailing "ago": `ago()` already answers with "now" when it is now.
+  const moved = state.usageMovedAt
+    ? ` · changed <span data-ago="${esc(state.usageMovedAt)}">${ago(state.usageMovedAt)}</span>`
+    : ' · unchanged so far';
+  return `<span class="usage-read">${icon('clock')}last read
+    <span data-ago="${esc(state.usageAt)}">${ago(state.usageAt)}</span>${moved}</span>`;
 }
 
 export function renderUsage() {
@@ -280,7 +305,8 @@ export function renderUsage() {
   }
   // Home already leads with these; no need to print them twice.
   $('usage-side').hidden = !inner || route.view === 'home';
-  $('usage-empty').hidden = Boolean(inner);
+  $('usage-empty').hidden = Boolean(inner) || Boolean(state.usageError);
+  $('usage-foot').innerHTML = freshnessHtml();
 
   const r = tightest();
   $('usage-note').textContent = r
@@ -361,17 +387,31 @@ function activityHtml(jobs) {
 
 // ── suggestions ───────────────────────────────────────────────────────
 
-/** Rendered suggestions by id, so a click can find the prompt again. */
+/**
+ * Everything offered anywhere, by id, so a click can find its prompt again.
+ * Two engines fill it — next steps and new builds — and ids are stable, so
+ * each render overwrites its own entries rather than clearing the lot.
+ */
 const shown = new Map();
 export const suggestionById = (id) => shown.get(id) ?? null;
+const remember = (list) => { for (const it of list) shown.set(it.id, it); return list; };
 
-function suggestionList() {
+/** Closing summaries by job id — they sharpen every keyword probe. */
+function summaryMap() {
   const summaries = new Map();
   for (const j of jobList()) {
     const r = resultOf(j.id);
     if (r) summaries.set(j.id, r.text);
   }
-  return suggest({ jobs: jobList(), projects: state.projects, summaries, limit: 6 });
+  return summaries;
+}
+
+const engineInput = () => ({
+  jobs: jobList(), projects: state.projects, summaries: summaryMap(),
+});
+
+function suggestionList() {
+  return suggest({ ...engineInput(), limit: 6 });
 }
 
 const suggestionHtml = (s) => `
@@ -388,9 +428,7 @@ const suggestionHtml = (s) => `
   </button>`;
 
 export function renderSuggestions() {
-  const all = suggestionList();
-  shown.clear();
-  for (const s of all) shown.set(s.id, s);
+  const all = remember(suggestionList());
 
   const fromYours = all.filter((s) => s.kind !== 'starter').length;
   const note = fromYours
@@ -405,6 +443,129 @@ export function renderSuggestions() {
 
   $('suggest-new').innerHTML = all.map(suggestionHtml).join('');
   $('suggest-new-note').textContent = note;
+}
+
+// ── ideas (the long list, read off everything you have made) ──────────
+
+/** 'all' · 'next' · 'new' · 'theme:<key>'. Set by the chip row. */
+let ideaFilter = 'all';
+export const setIdeaFilter = (key) => { ideaFilter = key; };
+export const ideaFilterKey = () => ideaFilter;
+
+/** Both engines at full length — this is the view that shows everything. */
+const ideaSets = () => {
+  const input = engineInput();
+  return {
+    next: remember(suggest({ ...input, limit: 24 }).filter((s) => s.kind !== 'starter')),
+    builds: remember(ideas({ ...input, limit: 30 })),
+    read: profile(input),
+  };
+};
+
+/**
+ * A build is a card, not a row: the title alone doesn't say enough to pick
+ * one, so it carries a line about what it is and the evidence that put it
+ * here. Clicking it loads the brief, which is the actual artefact.
+ */
+const ideaCard = (it) => `
+  <button type="button" class="idea" data-suggest="${esc(it.id)}"
+          data-kind="${esc(it.kind)}" data-theme="${esc(it.theme ?? '')}">
+    <span class="idea-top">
+      <span class="idea-icon">${icon(it.icon)}</span>
+      <span class="idea-tag-row">${it.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>
+      <span class="idea-go">${icon('arrow')}</span>
+    </span>
+    <span class="idea-title">${esc(it.title)}</span>
+    <span class="idea-blurb">${esc(it.blurb)}</span>
+    <span class="idea-why">${icon('pulse')}<span>${esc(it.why)}</span></span>
+  </button>`;
+
+/** One chip per way of narrowing the list, each carrying its own count. */
+function chipRow(next, builds) {
+  const themes = [];
+  for (const b of builds) {
+    if (!b.theme) continue;
+    const found = themes.find((t) => t.key === b.theme);
+    if (found) found.n++;
+    else themes.push({ key: b.theme, label: b.tags[0] ?? b.theme, n: 1 });
+  }
+
+  const chips = [
+    { key: 'all', label: 'Everything', n: next.length + builds.length },
+    ...(next.length ? [{ key: 'next', label: 'Carry on', n: next.length }] : []),
+    { key: 'new', label: 'New projects', n: builds.length },
+    ...themes.map((t) => ({ key: `theme:${t.key}`, label: t.label, n: t.n })),
+  ];
+
+  return chips.map((c) => `
+    <button type="button" class="filter-chip${c.key === ideaFilter ? ' on' : ''}"
+            data-idea-filter="${esc(c.key)}" aria-pressed="${c.key === ideaFilter}">
+      ${esc(c.label)}<span class="count">${c.n}</span>
+    </button>`).join('');
+}
+
+/** What the engine actually read, spelled out — the basis for every card. */
+function profileHtml(read) {
+  if (!read.ranked.length) return '';
+  const rows = read.ranked.slice(0, 6).map(([key, from]) => `
+    <div class="info-row">
+      <span class="info-k">${esc(themeLabel(key))}</span>
+      <span class="info-v">${esc(from.slice(0, 4).join(', '))}${
+        from.length > 4 ? ` +${from.length - 4}` : ''}</span>
+    </div>`).join('');
+  const stack = read.stack.length
+    ? `<p class="info-note">Briefs stay in the stack you already use: ${
+      esc(read.stack.slice(0, 4).join(', '))}.</p>`
+    : '';
+  return `<p class="profile-h">${icon('filter')}What your projects say you build</p>${rows}${stack}`;
+}
+
+export function renderIdeas() {
+  const { next, builds, read } = ideaSets();
+
+  const theme = ideaFilter.startsWith('theme:') ? ideaFilter.slice(6) : null;
+  const showNext = ideaFilter === 'all' || ideaFilter === 'next';
+  const shownBuilds = theme ? builds.filter((b) => b.theme === theme)
+    : ideaFilter === 'next' ? []
+      : builds;
+
+  $('ideas-intro').textContent = read.ranked.length
+    ? `${plural(next.length + builds.length, 'idea')}, every one of them derived from `
+      + `your ${plural(read.slugs.length, 'project')}.`
+    : 'Nothing to read off yet — run a job or two and this fills up with ideas '
+      + 'built from your own work.';
+
+  const prof = profileHtml(read);
+  $('ideas-profile').innerHTML = prof;
+  $('ideas-profile').hidden = !prof;
+
+  $('ideas-filters').innerHTML = chipRow(next, builds);
+
+  $('ideas-next-block').hidden = !(showNext && next.length);
+  $('ideas-next').innerHTML = next.map(suggestionHtml).join('');
+  $('ideas-next-note').textContent = next.length
+    ? `${plural(new Set(next.map((s) => s.slug)).size, 'project')} with a next step`
+    : '';
+
+  $('ideas-new-block').hidden = !shownBuilds.length;
+  $('ideas-grid').innerHTML = shownBuilds.map(ideaCard).join('');
+  $('ideas-new-note').textContent = theme
+    ? themeLabel(theme)
+    : shownBuilds.length ? 'none of these exist yet' : '';
+
+  $('ideas-empty').hidden = Boolean(shownBuilds.length) || !$('ideas-next-block').hidden;
+}
+
+/**
+ * How many ideas are waiting, on the two doors into that view. Cheap enough
+ * to run every render — both engines are regexes over rows already in memory.
+ */
+export function renderIdeaBadge() {
+  const input = engineInput();
+  const n = suggest({ ...input, limit: 24 }).filter((s) => s.kind !== 'starter').length
+    + ideas({ ...input, limit: 30 }).length;
+  $('ideas-count').textContent = String(n);
+  $('ideas-teaser').textContent = `All ${n} ideas`;
 }
 
 // ── home ──────────────────────────────────────────────────────────────

@@ -761,7 +761,10 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   box-shadow: var(--shadow-1);
 }
 
-.block { margin-bottom: 1.6rem; }
+/* `block` means two things: a section of the page, and a full-width button.
+   Only the section wants the trailing space — scoped so a `.btn.block` in a
+   grid doesn't quietly inherit 1.6rem of it. */
+:is(section, div).block { margin-bottom: 1.6rem; }
 .block-h {
   display: flex; align-items: center; gap: .5rem;
   margin: 0 0 .6rem;
@@ -1183,6 +1186,135 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 .suggest-go { flex: none; color: var(--muted); }
 .suggest-go svg { width: 16px; height: 16px; }
 .suggest:hover .suggest-go { color: var(--accent-text); }
+
+/* The limits block says when it last read, because a meter that is stuck
+   looks exactly like a quiet account otherwise. */
+.usage-bar {
+  display: flex; align-items: center; gap: .5rem;
+  margin-top: .5rem;
+}
+.usage-bar .btn { margin-left: auto; }
+.usage-read {
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-size: 11.5px; color: var(--muted); min-width: 0;
+}
+.usage-read svg { width: 12px; height: 12px; opacity: .8; }
+.usage-read.bad { color: var(--critical-text); }
+.usage-read [data-ago] { font-variant-numeric: tabular-nums; }
+
+/* ── ideas ──────────────────────────────────────────────────────────── */
+/* The long list. A next step is a row — you already know the project. A new
+   build is a card, because the title alone isn't enough to choose one: it
+   carries a line about what it is and the evidence that put it on screen. */
+.block-more {
+  display: flex; align-items: center; gap: .3rem;
+  margin-top: .5rem;
+  font-size: 12px; font-weight: 550; color: var(--accent-text);
+  text-decoration: none;
+}
+.block-more svg { width: 14px; height: 14px; }
+.block-more:hover { text-decoration: underline; }
+
+.profile-card {
+  display: grid; gap: .1rem;
+  padding: .8rem .9rem .85rem;
+  margin-bottom: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+.profile-h {
+  display: flex; align-items: center; gap: .35rem;
+  margin: 0 0 .35rem;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+}
+.profile-h svg { width: 13px; height: 13px; }
+
+.filter-row {
+  display: flex; flex-wrap: wrap; gap: .35rem;
+  margin-bottom: 1.1rem;
+}
+.filter-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .3rem .6rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  font-size: 12.5px; color: var(--text-2);
+  cursor: pointer;
+  transition: border-color var(--dur-1) ease, color var(--dur-1) ease,
+              background var(--dur-1) ease;
+}
+.filter-chip:hover { border-color: var(--line-strong); color: var(--text); }
+.filter-chip .count {
+  padding: .02rem .3rem;
+  background: var(--surface-2); border-radius: var(--r-full);
+  font-size: 10.5px; font-weight: 650; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The selected chip is the accent — this is interaction, not data. */
+.filter-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-text); font-weight: 560;
+}
+.filter-chip.on .count { background: var(--surface); color: var(--accent-text); }
+
+.idea-grid { display: grid; gap: .55rem; }
+@media (min-width: 680px) { .idea-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.idea {
+  display: grid; gap: .25rem; align-content: start;
+  width: 100%; padding: .8rem .85rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  text-align: left; color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--dur-1) ease, transform var(--dur-1) ease,
+              box-shadow var(--dur-1) ease;
+}
+.idea:hover {
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+.idea:active { transform: none; }
+
+.idea-top { display: flex; align-items: center; gap: .4rem; margin-bottom: .15rem; }
+.idea-icon {
+  display: grid; place-items: center; flex: none;
+  width: 1.75rem; height: 1.75rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  color: var(--accent-text);
+}
+.idea-icon svg { width: 15px; height: 15px; }
+.idea-tag-row { display: flex; flex-wrap: wrap; gap: .25rem; min-width: 0; }
+.idea-go { margin-left: auto; flex: none; color: var(--muted); }
+.idea-go svg { width: 15px; height: 15px; }
+.idea:hover .idea-go { color: var(--accent-text); }
+
+.idea-title { font-size: 14px; font-weight: 580; line-height: 1.3; }
+.idea-blurb { font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.idea-why {
+  display: flex; align-items: center; gap: .3rem;
+  margin-top: .2rem; padding-top: .4rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11.5px; color: var(--muted); min-width: 0;
+}
+.idea-why svg { width: 12px; height: 12px; flex: none; color: var(--accent-text); }
+.idea-why span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An opener is not read off anything, so it doesn't wear the brand. */
+.idea[data-kind="opener"] .idea-icon {
+  background: var(--surface-2); border-color: var(--line); color: var(--muted);
+}
+.idea[data-kind="opener"] .idea-why svg { color: var(--muted); }
 
 /* ── toasts, dialog, offline bar ────────────────────────────────────── */
 .toasts {

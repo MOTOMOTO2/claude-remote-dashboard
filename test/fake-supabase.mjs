@@ -5,6 +5,8 @@
 export const fake = {
   session: null,
   tables: { jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [] },
+  /** table -> error, so a read can be made to fail the way a real one does. */
+  failures: {},
   inserts: [],
   updates: [],
   deletes: [],
@@ -13,6 +15,7 @@ export const fake = {
 
   reset() {
     this.tables = { jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [] };
+    this.failures = {};
     this.inserts = [];
     this.updates = [];
     this.deletes = [];
@@ -30,6 +33,12 @@ export const fake = {
         h.cb({ eventType, table, new: row, old });
       }
     }
+  },
+
+  /** Make every read of one table error until it is called with null. */
+  failTable(table, message) {
+    if (message) this.failures[table] = { message };
+    else delete this.failures[table];
   },
 
   signIn(session = { user: { id: 'u1' } }) {
@@ -98,6 +107,8 @@ class Query {
   single() { this.one = true; return this; }
 
   then(resolve) {
+    const failure = fake.failures[this.table];
+    if (failure) return Promise.resolve({ data: null, error: failure }).then(resolve);
     const data = this.one ? (this.rows[0] ?? null) : this.rows;
     return Promise.resolve(ok(data)).then(resolve);
   }

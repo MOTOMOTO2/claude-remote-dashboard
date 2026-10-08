@@ -83,6 +83,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
         New project
       </button>
+      <a id="ideas-link" class="btn ghost block" href="#/ideas">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
+        Ideas<span id="ideas-count" class="count"></span>
+      </a>
       <div class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
         <input id="project-search" type="search" placeholder="Search projects"
@@ -169,6 +173,13 @@
           <p id="usage-empty" class="empty-note" hidden>
             No readings yet — your desktop reports these when it starts up.
           </p>
+          <div class="usage-bar">
+            <span id="usage-foot"></span>
+            <button id="usage-refresh" class="btn tiny ghost" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry"/></svg>
+              Refresh
+            </button>
+          </div>
         </section>
 
         <section id="suggest-block" class="block" hidden>
@@ -177,6 +188,10 @@
             <span id="suggest-note" class="block-note"></span>
           </h2>
           <div id="suggest-list" class="suggest-list"></div>
+          <a class="block-more" href="#/ideas">
+            <span id="ideas-teaser">All ideas</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arrow"/></svg>
+          </a>
         </section>
 
         <section id="glance-block" class="block">
@@ -242,6 +257,43 @@
         <div id="thread" class="thread"></div>
       </section>
 
+      <!-- ── ideas ─────────────────────────────────────────── -->
+      <section id="ideas-view" class="view" hidden>
+        <div class="intro">
+          <svg class="intro-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
+          <h2 class="intro-h">What to build next</h2>
+          <p id="ideas-intro" class="intro-p"></p>
+        </div>
+
+        <div id="ideas-profile" class="profile-card" hidden></div>
+
+        <div id="ideas-filters" class="filter-row" role="group" aria-label="Filter ideas"></div>
+
+        <section id="ideas-next-block" class="block" hidden>
+          <h2 class="block-h">
+            <span>Carry on with</span>
+            <span id="ideas-next-note" class="block-note"></span>
+          </h2>
+          <div id="ideas-next" class="suggest-list"></div>
+        </section>
+
+        <section id="ideas-new-block" class="block" hidden>
+          <h2 class="block-h">
+            <span>New projects</span>
+            <span id="ideas-new-note" class="block-note"></span>
+          </h2>
+          <div id="ideas-grid" class="idea-grid"></div>
+        </section>
+
+        <p id="ideas-empty" class="empty-note center" hidden>
+          Nothing matches that filter — try another one.
+        </p>
+
+        <p class="empty-note center">Every one of these is read off your own
+           projects, in the page, by a handful of rules. Tapping one loads the
+           brief into the composer; you still press send.</p>
+      </section>
+
       <!-- ── new project ───────────────────────────────────── -->
       <section id="new-view" class="view" hidden>
         <div class="intro">
@@ -256,6 +308,10 @@
             <span id="suggest-new-note" class="block-note"></span>
           </h2>
           <div id="suggest-new" class="suggest-list"></div>
+          <a class="block-more" href="#/ideas">
+            <span>More ideas, read off your own work</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arrow"/></svg>
+          </a>
         </div>
         <div id="usage-new" class="usage card" hidden></div>
       </section>
@@ -382,6 +438,18 @@
     <g id="i-flow"><path d="M20 12a8 8 0 11-3.1-6.3M20 4.5V9h-4.5"/><path d="M8.6 12.4l2.6 2.6 4.4-5"/></g>
     <g id="i-rocket"><path d="M12 3.4c3 2.2 4.6 5.3 4.6 8.9l-2.4 3h-4.4l-2.4-3C7.4 8.7 9 5.6 12 3.4z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.8 18l-2 2.6M14.2 18l2 2.6"/></g>
     <g id="i-wand"><path d="M4.5 19.5L14.5 9.5"/><path d="M17.6 3.4l.9 2.2 2.2.9-2.2.9-.9 2.2-.9-2.2-2.2-.9 2.2-.9z"/></g>
+    <!-- idea themes -->
+    <g id="i-bulb"><path d="M9.4 17.5h5.2M10 20.5h4"/><path d="M12 3.5a5.6 5.6 0 00-3.3 10.1c.5.4.8 1 .8 1.6v.3h5v-.3c0-.6.3-1.2.8-1.6A5.6 5.6 0 0012 3.5z"/></g>
+    <g id="i-game"><rect x="2.8" y="7.5" width="18.4" height="9.5" rx="4.2"/><path d="M7 10.2v4M5 12.2h4M15.4 11.4h.01M17.8 13.4h.01"/></g>
+    <g id="i-globe"><circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8M12 3.6c2.2 2.3 3.4 5.2 3.4 8.4s-1.2 6.1-3.4 8.4c-2.2-2.3-3.4-5.2-3.4-8.4S9.8 5.9 12 3.6z"/></g>
+    <g id="i-terminal"><rect x="3" y="4.5" width="18" height="15" rx="2.4"/><path d="M7 10l2.6 2.4L7 14.8M12.6 15h4.4"/></g>
+    <g id="i-server"><rect x="3.4" y="4.5" width="17.2" height="6" rx="2"/><rect x="3.4" y="13.5" width="17.2" height="6" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h3M11 16.5h3"/></g>
+    <g id="i-database"><ellipse cx="12" cy="6.3" rx="7.4" ry="2.8"/><path d="M4.6 6.3v11.4c0 1.6 3.3 2.8 7.4 2.8s7.4-1.2 7.4-2.8V6.3M4.6 12c0 1.6 3.3 2.8 7.4 2.8s7.4-1.2 7.4-2.8"/></g>
+    <g id="i-chart"><path d="M4 20h16M7 20v-6M12 20V7M17 20v-9"/></g>
+    <g id="i-bot"><rect x="4.5" y="8" width="15" height="11" rx="3"/><path d="M12 4v4M9.3 12.6h.01M14.7 12.6h.01M9.8 15.8h4.4M2.5 12.5v2.5M21.5 12.5v2.5"/></g>
+    <g id="i-brain"><path d="M12 5.2v13.6"/><path d="M12 6.4a3 3 0 00-5.6 1.1A2.8 2.8 0 004 10.2c0 1 .5 1.9 1.3 2.4a2.9 2.9 0 00.5 3.6 3 3 0 004.3.4A2.6 2.6 0 0012 18.8"/><path d="M12 6.4a3 3 0 015.6 1.1A2.8 2.8 0 0120 10.2c0 1-.5 1.9-1.3 2.4a2.9 2.9 0 01-.5 3.6 3 3 0 01-4.3.4 2.6 2.6 0 01-1.9 2.2"/></g>
+    <g id="i-phone"><rect x="6.5" y="2.8" width="11" height="18.4" rx="2.8"/><path d="M10.6 5.4h2.8M10.8 18.6h2.4"/></g>
+    <g id="i-filter"><path d="M4 6h16M7 12h10M10 18h4"/></g>
   </defs>
 </svg>
 

@@ -84,14 +84,17 @@ function draw() {
   $('home-view').hidden = v !== 'home';
   $('chat-view').hidden = !(v === 'project' || v === 'pending');
   $('new-view').hidden = v !== 'new';
-  $('composer').hidden = v === 'home';
+  $('ideas-view').hidden = v !== 'ideas';
+  $('composer').hidden = v === 'home' || v === 'ideas';
   $('visibility-wrap').hidden = v === 'project';
 
   views.renderTopbar();
   views.renderSidebar();
   views.renderUsage();
+  views.renderIdeaBadge();
   // Only two views show them, and they read the whole account to work it out.
   if (v === 'home' || v === 'new') views.renderSuggestions();
+  if (v === 'ideas') views.renderIdeas();
 
   if (v === 'home') views.renderHome();
   if (v === 'project') views.renderChat();
@@ -156,6 +159,7 @@ $('menu-open').addEventListener('click', () => (drawerOpen() ? closeDrawer() : o
 $('menu-close').addEventListener('click', closeDrawer);
 $('scrim').addEventListener('click', closeDrawer);
 $('new-project').addEventListener('click', () => { go('#/new'); closeDrawer(); focusPrompt(); });
+$('ideas-link').addEventListener('click', closeDrawer);
 $('home-new').addEventListener('click', () => { go('#/new'); focusPrompt(); });
 
 $('project-search').addEventListener('input', (e) => {
@@ -164,7 +168,20 @@ $('project-search').addEventListener('input', (e) => {
 });
 
 $('host-badge').addEventListener('click', () => toast(views.hostExplainer(), { glyph: 'auto', ms: 4000 }));
-$('usage-pill').addEventListener('click', () => toast(views.usageSentence(), { glyph: 'gauge', ms: 5000 }));
+// Both usage affordances re-read before they answer, so tapping one is also
+// the way to force a refresh.
+$('usage-pill').addEventListener('click', () => {
+  toast(views.usageSentence(), { glyph: 'gauge', ms: 5000 });
+  store.pollUsage();
+});
+$('usage-refresh').addEventListener('click', async () => {
+  const btn = $('usage-refresh');
+  btn.disabled = true;
+  await store.pollUsage();
+  btn.disabled = false;
+  toast(store.state.usageError ? store.state.usageError : views.usageSentence(),
+    { glyph: 'gauge', bad: Boolean(store.state.usageError), ms: 4000 });
+});
 
 $('sign-out').addEventListener('click', async () => {
   closeDrawer();
@@ -258,9 +275,15 @@ $('composer').addEventListener('submit', async (e) => {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter]');
   if (!btn) return;
   const d = btn.dataset;
+
+  if (d.ideaFilter) {
+    views.setIdeaFilter(d.ideaFilter);
+    views.renderIdeas();
+    return;
+  }
 
   // A suggestion is only ever a head start: it lands in the composer, aimed at
   // the project it was derived from, and you still press send.
@@ -342,6 +365,7 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === '/' && !$('composer').hidden) { e.preventDefault(); prompt.focus(); }
   if (e.key === 'n') { e.preventDefault(); go('#/new'); focusPrompt(); }
+  if (e.key === 'i') { e.preventDefault(); go('#/ideas'); }
 });
 
 // password reveal
@@ -429,7 +453,9 @@ async function applySession(session) {
   await store.loadAll(route.slug);
   store.subscribe();
   store.pollHost();
-  hostTimer = setInterval(store.pollHost, 10_000);
+  // Usage rides the same timer as the host. Realtime on `usage_windows` is a
+  // bonus; this poll is what actually keeps the meters honest.
+  hostTimer = setInterval(() => { store.pollHost(); store.pollUsage(); }, 10_000);
   tickTimer = startTicker();
   if (route.view === 'project' || route.view === 'pending') scrollToEnd('auto');
 }
