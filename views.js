@@ -295,11 +295,12 @@ export function renderUsage() {
     const { tone, word } = level(pct);
     pill.classList.remove('warn', 'full');
     if (tone) pill.classList.add(tone);
+    // The pill has room for a number; the accessible name carries the word
+    // that goes with the colour, and the sentence behind both.
     pill.title = usageSentence();
-    pill.setAttribute('aria-label', usageSentence());
+    pill.setAttribute('aria-label', `Usage ${word} — ${usageSentence()}`);
     $('usage-pill-text').innerHTML = `${pct}%<span class="pill-sub"> ${
       esc(WINDOW_SHORT[r.window_type] ?? '')}</span>`;
-    pill.dataset.word = word;
   }
 }
 
@@ -539,8 +540,8 @@ function replyHtml(job) {
   const paused = job.status === 'paused' ? `
     <p class="note" data-status="paused">Usage limit reached. This picks up
       automatically where it left off${job.resume_at
-        ? ` ${esc(dayClock(job.resume_at))} — in ${esc(until(job.resume_at))}` : ''}
-      — nothing for you to do.</p>` : '';
+        ? ` — <b>${esc(dayClock(job.resume_at))}</b>, in ${esc(until(job.resume_at))}`
+        : ''}. Nothing for you to do.</p>` : '';
 
   const body = result
     ? `<div class="msg-body md">${md(result.text)}</div>`
