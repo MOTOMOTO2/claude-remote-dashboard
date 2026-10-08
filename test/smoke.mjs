@@ -401,8 +401,8 @@ gameChip.click();
 await tick();
 const narrowed = [...el('ideas-grid').querySelectorAll('.idea')];
 ok('the grid narrows to that theme',
-  narrowed.length > 0 && narrowed.every((c) => c.dataset.theme === 'game'),
-  narrowed.map((c) => c.dataset.theme).join());
+  narrowed.length > 0 && narrowed.every((c) => c.dataset.ideaTheme === 'game'),
+  narrowed.map((c) => c.dataset.ideaTheme).join());
 ok('the chip shows it is the active one',
   el('ideas-filters').querySelector('[data-idea-filter="theme:game"]').classList.contains('on'));
 ok('next steps step aside under a theme filter', el('ideas-next-block').hidden);
@@ -417,6 +417,12 @@ ok('and keeps the next steps', !el('ideas-next-block').hidden);
   .find((c) => c.dataset.ideaFilter === 'all').click();
 await tick();
 ok('everything comes back', !el('ideas-new-block').hidden && !el('ideas-next-block').hidden);
+
+// Leave a theme filter set on the way out: the account is wiped in §15, and
+// a filter that outlives the theme it names must not blank the page.
+[...el('ideas-filters').querySelectorAll('.filter-chip')]
+  .find((c) => c.dataset.ideaFilter === 'theme:game').click();
+await tick();
 
 // A new build is a brief, so it opens the composer for a brand-new project.
 el('prompt').value = '';
@@ -551,6 +557,8 @@ await tick();
 ok('the ideas view works on a fresh account', !el('ideas-view').hidden);
 ok('it drops the profile card with nothing to profile', el('ideas-profile').hidden);
 has('and says there is nothing to read off yet', text('ideas-intro'), 'Nothing to read off');
+ok('a filter that outlived its theme is dropped, not obeyed',
+  el('ideas-filters').querySelector('[data-idea-filter="all"]')?.classList.contains('on'));
 ok('it still offers somewhere to start',
   el('ideas-grid').querySelectorAll('.idea[data-kind="opener"]').length > 0);
 ok('with no carry-on block at all', el('ideas-next-block').hidden);

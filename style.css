@@ -1232,6 +1232,15 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 }
 .profile-h svg { width: 13px; height: 13px; }
 
+/* The sidebar door carries the size of the list behind it. */
+#ideas-link { justify-content: center; gap: .45rem; }
+#ideas-link .count {
+  padding: .02rem .32rem;
+  background: var(--surface-2); border-radius: var(--r-full);
+  font-size: 10.5px; font-weight: 650; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .filter-row {
   display: flex; flex-wrap: wrap; gap: .35rem;
   margin-bottom: 1.1rem;
