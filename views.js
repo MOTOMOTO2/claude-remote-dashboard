@@ -10,6 +10,7 @@ import { icon, setBadge } from './ui.js';
 import { route, projectHref } from './router.js';
 import { suggest } from './suggest.js';
 import { ideas, profile, themeLabel } from './ideas.js';
+import { catalog, languages, narrow, order, tally, liveHost, webUrl } from './catalog.js';
 import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
   projectOf, projectGone, eventsOf, lastActivity, resultOf,
@@ -84,6 +85,7 @@ export function renderTopbar() {
     pending: 'Starting…',
     new: 'New project',
     ideas: 'Ideas',
+    projects: 'Projects',
   };
   $('view-title').textContent = titles[route.view] ?? '';
 
@@ -103,6 +105,9 @@ export function renderTopbar() {
     sub = 'waiting for your desktop to name it';
   } else if (route.view === 'ideas') {
     sub = 'read off your own work';
+  } else if (route.view === 'projects') {
+    const t = tally(projectEntries());
+    sub = t.total ? `${plural(t.total, 'project')} · ${t.live} live` : '';
   }
   $('view-sub').textContent = sub;
 
@@ -185,6 +190,12 @@ export function renderSidebar() {
   }
 
   $('project-list').innerHTML = parts.join('');
+
+  // The two doors under "New project" say which of them you are behind.
+  for (const [id, view] of [['projects-link', 'projects'], ['ideas-link', 'ideas']]) {
+    if (route.view === view) $(id).setAttribute('aria-current', 'page');
+    else $(id).removeAttribute('aria-current');
+  }
 }
 
 // ── usage meters ──────────────────────────────────────────────────────
@@ -573,6 +584,121 @@ export function renderIdeaBadge() {
   $('ideas-teaser').textContent = `All ${n} ideas`;
 }
 
+// ── projects (everything you have, and where each one is live) ────────
+
+/** Search text, the active chip ('all' · 'live' · 'lang:<name>'), and the sort. */
+let projectQuery = '';
+let projectFilter = 'all';
+let projectSort = 'recent';
+export const setProjectQuery = (q) => { projectQuery = q; };
+export const setProjectFilter = (key) => { projectFilter = key; };
+export const setProjectSort = (key) => { projectSort = key; };
+
+const projectEntries = () => catalog({ projects: state.projects, jobs: jobList() });
+
+const LIVE_KIND = { fly: 'on Fly.io', pages: 'on GitHub Pages', homepage: 'at its homepage' };
+
+/** An external link, opened in a new tab — a live site, or the repo. */
+const outLink = (url, glyph, label) => `
+  <a class="btn tiny ghost" href="${esc(url)}" target="_blank" rel="noopener">${icon(glyph)}${label}</a>`;
+
+/**
+ * A project is a card: what it is, where it is live, and the ways in — its
+ * chat here, and its repo. The live link gets a line of its own because it is
+ * what this screen is for; a project that isn't online says so, so the
+ * absence reads as a fact rather than a gap.
+ */
+function projectCard(p) {
+  // Public or private is a fact about a GitHub repo, so only a repo gets one.
+  const tags = [
+    p.on_github ? (p.private ? 'private' : 'public') : '',
+    p.is_local && !p.on_github ? 'local only' : '',
+    p.on_github && !p.is_local ? 'not cloned' : '',
+    p.is_fork ? 'fork' : '',
+    p.is_archived ? 'archived' : '',
+  ].filter(Boolean);
+
+  const facts = [
+    p.language ? esc(p.language) : '',
+    p.pushed_at ? `pushed <span data-ago="${esc(p.pushed_at)}">${ago(p.pushed_at)}</span> ago` : '',
+    p.runs ? esc(plural(p.runs, 'run')) : '',
+    p.stars ? esc(plural(p.stars, 'star')) : '',
+  ].filter(Boolean);
+
+  const live = p.live_url ? `
+    <a class="proj-live" href="${esc(p.live_url)}" target="_blank" rel="noopener"
+       title="${esc(`Live ${LIVE_KIND[p.live_kind] ?? ''}`.trim())}">
+      ${icon('globe')}<span>${esc(liveHost(p.live_url))}</span>${icon('link')}
+    </a>`
+    : `<p class="proj-live none">${icon('globe')}<span>Not online</span></p>`;
+
+  return `
+    <article class="proj" data-project="${esc(p.name)}">
+      <div class="proj-top">
+        <a class="proj-name" href="${projectHref(p.name)}">${esc(p.name)}</a>
+        ${p.busy ? stateTag(p.busy.status, p.busy.status === 'running') : ''}
+      </div>
+      ${tags.length ? `<div class="proj-tags">${
+        tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+      <p class="proj-desc${p.description ? '' : ' none'}">${
+        esc(p.description ?? 'No description yet.')}</p>
+      ${facts.length ? `<p class="proj-facts">${
+        facts.map((f) => `<span>${f}</span>`).join('<span aria-hidden="true">·</span>')}</p>` : ''}
+      ${live}
+      <div class="proj-actions">
+        <a class="btn tiny ghost" href="${projectHref(p.name)}">${icon('arrow')}chat</a>
+        ${p.full_name ? outLink(`https://github.com/${p.full_name}`, 'link', 'repo') : ''}
+      </div>
+    </article>`;
+}
+
+/** All · Live · one chip per language, each carrying its own count. */
+function projectChips(all) {
+  const t = tally(all);
+  const chips = [
+    { key: 'all', label: 'All', n: t.total },
+    ...(t.live ? [{ key: 'live', label: 'Live', n: t.live }] : []),
+    ...languages(all).map(([lang, n]) => ({ key: `lang:${lang}`, label: lang, n })),
+  ];
+  return chips.map((c) => `
+    <button type="button" class="filter-chip${c.key === projectFilter ? ' on' : ''}"
+            data-project-filter="${esc(c.key)}" aria-pressed="${c.key === projectFilter}">
+      ${esc(c.label)}<span class="count">${c.n}</span>
+    </button>`).join('');
+}
+
+export function renderProjects() {
+  const all = projectEntries();
+  const t = tally(all);
+
+  // The filter outlives the render that set it, and the list moves under it:
+  // a language whose last project went away would leave the page blank.
+  const langs = new Set(all.map((e) => e.language));
+  if ((projectFilter === 'live' && !t.live)
+    || (projectFilter.startsWith('lang:') && !langs.has(projectFilter.slice(5)))) {
+    projectFilter = 'all';
+  }
+
+  const shown = order(narrow(all, { query: projectQuery, filter: projectFilter }), projectSort);
+
+  $('projects-intro').textContent = t.total
+    ? `${plural(t.total, 'project')}: ${t.live} live on the web, ${t.onGitHub} on GitHub${
+      t.localOnly ? `, ${t.localOnly} only on your desktop` : ''}.`
+    : state.loading ? 'Loading…' : 'Nothing listed yet.';
+
+  $('projects-tools').hidden = !t.total;
+  $('projects-filters').innerHTML = t.total ? projectChips(all) : '';
+  $('projects-grid').innerHTML = shown.map(projectCard).join('');
+  $('projects-none').hidden = !t.total || Boolean(shown.length);
+  $('projects-empty').hidden = Boolean(t.total) || state.loading;
+}
+
+/** The size of the list, on the sidebar door into it. */
+export function renderProjectBadge() {
+  const n = projectEntries().length;
+  $('projects-count').textContent = n ? String(n) : '';
+}
+
 // ── home ──────────────────────────────────────────────────────────────
 
 const pct = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : '—');
@@ -721,6 +847,7 @@ function replyHtml(job) {
          <div class="log">${log.map(logLine).join('')}</div></details>`;
 
   const actions = [
+    webUrl(job.live_url) ? outLink(job.live_url, 'globe', 'site') : '',
     job.repo_url
       ? `<a class="btn tiny ghost" href="${esc(job.repo_url)}" target="_blank" rel="noopener">
            ${icon('link')}repo</a>`
@@ -776,6 +903,9 @@ export function renderChat() {
   const p = projectOf(slug);
   const gone = projectGone(slug);
   const repo = githubUrl(p) ?? mine.find((j) => j.repo_url)?.repo_url ?? null;
+  // The same answer the Projects screen gives, so the two never disagree.
+  const site = catalog({ projects: p ? [p] : [], jobs: mine })
+    .find((e) => e.name === slug)?.live_url ?? null;
 
   $('chat-head').hidden = false;
   $('chat-head').innerHTML = `
@@ -785,6 +915,7 @@ export function renderChat() {
         ${p?.private ? '<span class="tag">private</span>' : ''}
         ${p?.is_local && !p?.full_name ? '<span class="tag">local</span>' : ''}
         ${gone ? '<span class="tag gone">gone</span>' : ''}
+        ${site ? outLink(site, 'globe', 'site') : ''}
         ${repo ? `<a class="btn tiny ghost" href="${esc(repo)}" target="_blank" rel="noopener">
                     ${icon('link')}repo</a>` : ''}
         ${mine.length ? `<button class="btn tiny ghost" data-delete-chat="${esc(slug)}">

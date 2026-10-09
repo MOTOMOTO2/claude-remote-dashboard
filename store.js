@@ -77,8 +77,9 @@ export const changed = () => emit('change');
 export async function loadAll(openSlug = null) {
   const [jobRes, projRes, useRes] = await Promise.all([
     sb.from('jobs').select('*').order('created_at', { ascending: false }).limit(200),
-    sb.from('projects').select('name,full_name,is_local,private,pushed_at')
-      .order('pushed_at', { ascending: false, nullsFirst: false }),
+    // Every column, not a list: the catalogue ones (description, live link…)
+    // only exist once that migration has run, and `*` works either way.
+    projectQuery(),
     sb.from('usage_windows').select('*'),
   ]);
 
@@ -100,6 +101,21 @@ export async function loadAll(openSlug = null) {
   }
 
   state.loading = false;
+  changed();
+}
+
+const projectQuery = () => sb.from('projects').select('*')
+  .order('pushed_at', { ascending: false, nullsFirst: false });
+
+/**
+ * Re-read the project list. The host syncs it on its own clock, and a job
+ * that just finished has usually changed it — a new repo, a new live link —
+ * so a finish is the moment to look again. A failed read keeps what we had.
+ */
+export async function loadProjects() {
+  const { data, error } = await projectQuery();
+  if (error) return;
+  state.projects = data ?? [];
   changed();
 }
 

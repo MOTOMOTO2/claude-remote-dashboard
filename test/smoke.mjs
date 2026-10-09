@@ -218,6 +218,10 @@ ok('sidebar lists three chats and one untouched repo',
   el('project-list').querySelectorAll('.list-item').length === 4,
   `got ${el('project-list').querySelectorAll('.list-item').length}`);
 has('sidebar labels the untouched repos', el('project-list').innerHTML, 'Your repos');
+ok('the projects door counts every project', text('projects-count') === '4',
+  `got ${text('projects-count')}`);
+ok('no door is marked current on home',
+  !el('projects-link').hasAttribute('aria-current') && !el('ideas-link').hasAttribute('aria-current'));
 has('sidebar shows a running tag', el('project-list').innerHTML, 'data-status="running"');
 ok('composer is hidden on home', el('composer').hidden);
 ok('host pill reads online', el('host-badge').classList.contains('online'));
@@ -263,6 +267,12 @@ ok('a finished job offers run again', Boolean(el('thread').querySelector('[data-
 ok('a summary can be copied', Boolean(el('thread').querySelector('[data-copy-summary="j2"]')));
 has('the repo link is offered', el('chat-head').innerHTML, 'https://github.com/me/alpha');
 ok('the chat can be cleared', Boolean(el('chat-head').querySelector('[data-delete-chat="alpha"]')));
+ok('the chat head links to the live site',
+  el('chat-head').querySelector('a[href="https://alpha.fly.dev/"]')?.target === '_blank');
+ok('the reply that deployed it links there too',
+  Boolean(el('thread').querySelector('#job-j2 a[href="https://alpha.fly.dev/"]')));
+ok('a reply that deployed nothing has no site link',
+  !el('thread').querySelector('#job-j1 a[href*="fly.dev"]'));
 has('the chat head counts the runs', el('chat-head').textContent, '2 runs');
 has('the chat head counts the finished ones', el('chat-head').textContent, '1 done');
 has('the chat head adds up the turns', el('chat-head').textContent, '14 turns');
@@ -300,10 +310,15 @@ ok('stop requests cancellation',
 
 // ── 9. a job finishing while you watch ────────────────────────────────
 
+// The host deploys and re-syncs before it marks a job done, so a finish is
+// when the project list is worth reading again.
+fake.tables.projects[0].live_url = 'https://alpha-v2.fly.dev/';
 fake.emit('jobs', 'UPDATE', { ...fake.tables.jobs[0], status: 'done', num_turns: 9 });
 await tick();
 has('a finish toast names the project', el('toasts').textContent, 'alpha');
 ok('the thread re-renders without a live log', !el('thread').querySelector('[data-log="j1"]'));
+has('a finish re-reads the project list, live link and all',
+  el('chat-head').innerHTML, 'https://alpha-v2.fly.dev/');
 
 // ── 10. the new-project view ──────────────────────────────────────────
 
@@ -438,6 +453,124 @@ ok('an idea loads a real brief, not its title',
 ok('nothing was queued by clicking it', fake.inserts.at(-1)?.prompt !== el('prompt').value);
 el('prompt').value = '';
 
+// ── 10c. the projects view ────────────────────────────────────────────
+// Everything you have, what each one is, and where it is live. The host
+// writes the catalogue; this screen adds the runs and anything in flight.
+
+window.location.hash = '#/projects';
+await tick();
+
+ok('the projects view is shown', !el('projects-view').hidden);
+ok('every other view steps aside there',
+  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden && el('ideas-view').hidden);
+ok('the composer is out of the way', el('composer').hidden);
+has('the topbar names it', text('view-title'), 'Projects');
+has('the topbar says how many are live', text('view-sub'), '2 live');
+ok('its sidebar door is marked current', el('projects-link').getAttribute('aria-current') === 'page');
+ok('and the ideas door is not', !el('ideas-link').hasAttribute('aria-current'));
+
+const projCards = () => [...el('projects-grid').querySelectorAll('.proj')];
+const shownNames = () => projCards().map((c) => c.dataset.project);
+const projCard = (name) => el('projects-grid').querySelector(`[data-project="${name}"]`);
+
+// delta is being built right now: it has a chat before the host lists it.
+ok('every listed project has a card, plus the one being built',
+  shownNames().length === 5 && shownNames().includes('delta'), shownNames().join());
+ok('the sidebar door counts it too', text('projects-count') === '5', text('projects-count'));
+has('the intro counts them', text('projects-intro'), '5 projects');
+has('and says how many are live', text('projects-intro'), '2 live on the web');
+
+has('a card says what the project is', projCard('alpha').textContent, 'A snake game');
+has('a card names its language', projCard('alpha').textContent, 'JavaScript');
+has('a card counts the runs it has had', projCard('alpha').textContent, '3 runs');
+has('a card counts stars when there are some', projCard('untouched-repo').textContent, '3 stars');
+
+const liveA = projCard('alpha').querySelector('a.proj-live');
+ok('a live project links to its site', liveA?.getAttribute('href') === 'https://alpha-v2.fly.dev/',
+  liveA?.getAttribute('href'));
+ok('in a new tab, without handing it the opener',
+  liveA?.target === '_blank' && liveA?.rel.includes('noopener'));
+has('the link reads as an address, not a URL', liveA?.textContent ?? '', 'alpha-v2.fly.dev');
+ok('the link does not print its scheme', !(liveA?.textContent ?? '').includes('https://'));
+has('a Pages site keeps its path', projCard('untouched-repo').textContent, 'me.github.io/untouched-repo');
+has('a project that is not online says so', projCard('gamma').textContent, 'Not online');
+has('a project with no description says so', projCard('gamma').textContent, 'No description yet');
+ok('a description is escaped, never parsed',
+  projCard('beta').innerHTML.includes('&lt;my&gt;') && !projCard('beta').querySelector('my'));
+
+has('a desktop-only project is labelled', projCard('gamma').textContent, 'local only');
+ok('and is not called public or private',
+  !/public|private/.test(projCard('gamma').querySelector('.proj-tags')?.textContent ?? ''));
+has('a repo not on the desktop is labelled', projCard('beta').textContent, 'not cloned');
+has('a private repo is labelled', projCard('alpha').textContent, 'private');
+ok('a repo link is offered for a project on GitHub',
+  Boolean(projCard('beta').querySelector('a[href="https://github.com/me/beta"]')));
+ok('and not for one that is not on GitHub',
+  !projCard('gamma').querySelector('a[href^="https://github.com/"]'));
+ok('every card opens its chat',
+  projCards().every((c) => c.querySelector('.proj-name').getAttribute('href')
+    === `#/p/${encodeURIComponent(c.dataset.project)}`));
+has('a project being worked on says so', projCard('delta').innerHTML, 'data-status="running"');
+has('a paused one says that instead', projCard('gamma').innerHTML, 'data-status="paused"');
+
+const projChips = () => [...el('projects-filters').querySelectorAll('.filter-chip')];
+const projChip = (key) => projChips().find((c) => c.dataset.projectFilter === key);
+ok('there is an all chip, a live chip, and one per language, most used first',
+  projChips().map((c) => c.dataset.projectFilter).join() === 'all,live,lang:TypeScript,lang:JavaScript',
+  projChips().map((c) => c.dataset.projectFilter).join());
+ok('all is the selected chip to begin with', projChip('all').classList.contains('on'));
+ok('every chip carries its own count',
+  projChips().every((c) => /\d/.test(c.querySelector('.count')?.textContent ?? '')));
+
+projChip('live').click();
+await tick();
+ok('the live chip keeps only what is live',
+  shownNames().sort().join() === 'alpha,untouched-repo', shownNames().join());
+ok('and shows that it is the active one', projChip('live').classList.contains('on'));
+
+projChip('lang:TypeScript').click();
+await tick();
+ok('a language chip keeps only that language',
+  shownNames().sort().join() === 'beta,untouched-repo', shownNames().join());
+
+projChip('all').click();
+await tick();
+ok('all brings everything back', shownNames().length === 5);
+
+const searchProjects = async (q) => {
+  el('projects-search').value = q;
+  el('projects-search').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick();
+};
+await searchProjects('snake');
+ok('search reads the descriptions', shownNames().join() === 'alpha', shownNames().join());
+await searchProjects('forecast');
+ok('and the topics', shownNames().join() === 'beta', shownNames().join());
+await searchProjects('nothing-like-this');
+ok('a search with no match says so', !el('projects-none').hidden && shownNames().length === 0);
+await searchProjects('');
+ok('clearing it hides that note again', el('projects-none').hidden);
+
+const sortProjects = async (value) => {
+  const radio = el('projects-sort').querySelector(`input[value="${value}"]`);
+  radio.checked = true;
+  radio.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick();
+};
+await sortProjects('name');
+ok('A–Z sorts by name', shownNames().join() === 'alpha,beta,delta,gamma,untouched-repo',
+  shownNames().join());
+await sortProjects('recent');
+ok('recent puts the work in flight first',
+  shownNames().slice(0, 3).sort().join() === 'alpha,delta,gamma', shownNames().join());
+ok('then whatever moved last', shownNames().slice(3).join() === 'beta,untouched-repo',
+  shownNames().join());
+
+// Leave a language filter on: §15 empties the account, and a filter that
+// outlives its language must not blank the page when projects come back.
+projChip('lang:JavaScript').click();
+await tick();
+
 // ── 11. clearing a chat ───────────────────────────────────────────────
 
 window.location.hash = '#/p/beta';
@@ -495,6 +628,11 @@ await tick();
 key('/');
 ok('"/" does nothing on home, where there is no composer',
   window.document.activeElement !== el('prompt'));
+key('p');
+await tick();
+ok('"p" opens the projects', window.location.hash === '#/projects');
+window.location.hash = '#/';
+await tick();
 
 // ── 14. finish notifications ──────────────────────────────────────────
 
@@ -562,6 +700,27 @@ ok('a filter that outlived its theme is dropped, not obeyed',
 ok('it still offers somewhere to start',
   el('ideas-grid').querySelectorAll('.idea[data-kind="opener"]').length > 0);
 ok('with no carry-on block at all', el('ideas-next-block').hidden);
+
+window.location.hash = '#/projects';
+await tick();
+ok('the projects view has an empty state of its own', !el('projects-empty').hidden);
+ok('with no search or sort for nothing', el('projects-tools').hidden);
+ok('and no filter chips', el('projects-filters').children.length === 0);
+ok('and no "nothing matches" note — nothing was searched', el('projects-none').hidden);
+ok('the sidebar door drops its count', text('projects-count') === '');
+
+// Projects come back: the language filter left on in §10c names a language
+// none of them use, so it is dropped rather than obeyed.
+fake.tables.projects = [{ name: 'solo', full_name: 'me/solo', language: 'Go', pushed_at: iso(5) }];
+window.document.dispatchEvent(new window.Event('visibilitychange'));
+await tick();
+ok('a filter that outlived its language is dropped, not obeyed',
+  el('projects-filters').querySelector('[data-project-filter="all"]')?.classList.contains('on')
+  && el('projects-grid').querySelectorAll('.proj').length === 1);
+fake.tables.projects = [];
+window.document.dispatchEvent(new window.Event('visibilitychange'));
+await tick();
+
 window.location.hash = '#/';
 await tick();
 
@@ -652,6 +811,20 @@ ok('an account with nothing in it still suggests something',
   suggest({}).length > 0 && suggest({}).every((s) => s.kind === 'starter'));
 ok('every suggestion ships a prompt, a title and a reason',
   [...failed, ...local, ...spread].every((s) => s.prompt && s.title && s.why && s.id));
+
+// "Put it online" trusts the host's record over the keyword probe.
+const webSite = (project, job = {}) => suggest({
+  jobs: [{ id: 'w', project_slug: 'site', status: 'done', created_at: iso(5),
+    prompt: 'a landing page in html and css with tests and a readme and a ci workflow', ...job }],
+  projects: [{ name: 'site', full_name: 'me/site', is_local: true, ...project }],
+}).filter((s) => s.slug === 'site').map((s) => s.kind);
+ok('a browser project with nothing deployed is offered a deploy',
+  webSite({}).includes('deploy'), webSite({}).join());
+ok('one the host lists as live is not', !webSite({ live_url: 'https://site.fly.dev/' }).includes('deploy'));
+ok('nor one whose last run deployed it',
+  !webSite({}, { live_url: 'https://site.fly.dev/' }).includes('deploy'));
+ok('nor one kept on the desktop, which the host never deploys',
+  !webSite({ full_name: null }).includes('deploy'));
 
 // ── 18. the idea engine ───────────────────────────────────────────────
 // Everything it offers is supposed to be derived, so the checks are about
@@ -753,6 +926,60 @@ const broad = ideaList({
 ok('the first three ideas come from three different themes',
   new Set(broad.map((i) => i.theme)).size === 3, broad.map((i) => i.theme).join());
 ok('a limit is a limit', broad.length === 3);
+
+// ── 18b. the project catalogue ────────────────────────────────────────
+// What the Projects screen is built from. Fixed inputs, because a wrong
+// answer here is a link to the wrong place, or to nowhere.
+
+const { catalog, narrow, order, languages, tally, liveHost, webUrl } = await import('../catalog.js');
+
+const cat = catalog({
+  projects: [
+    { name: 'web', full_name: 'me/web', language: 'Go', pushed_at: iso(10),
+      live_url: 'https://web.fly.dev/', live_kind: 'fly' },
+    { name: 'cli', full_name: 'me/cli', language: 'Go', pushed_at: iso(50) },
+    { name: 'sneaky', full_name: 'me/sneaky', live_url: 'javascript:alert(1)' },
+    { name: 'Zed', full_name: null, is_local: true },
+  ],
+  jobs: [
+    { id: 'a', project_slug: 'cli', status: 'done', created_at: iso(1), live_url: 'https://cli.fly.dev/' },
+    { id: 'b', project_slug: 'fresh', status: 'running', created_at: iso(2) },
+    { id: 'c', project_slug: 'gone', status: 'done', created_at: iso(3) },
+    { id: 'd', project_slug: 'web', status: 'queued', created_at: iso(4) },
+    { id: 'e', project_slug: 'web', status: 'paused', created_at: iso(6) },
+  ],
+});
+const byName = (n) => cat.find((e) => e.name === n);
+
+ok('the catalogue is the host list plus a build in flight',
+  cat.map((e) => e.name).sort().join() === 'Zed,cli,fresh,sneaky,web', cat.map((e) => e.name).join());
+ok('a chat whose project the host has lost is left out', !byName('gone'));
+ok('with no host list at all, every chat counts',
+  catalog({ jobs: [{ id: 'x', project_slug: 'x', status: 'done' }] }).length === 1);
+ok('a deploy on a job shows before the host re-syncs',
+  byName('cli').live_url === 'https://cli.fly.dev/' && byName('cli').live_kind === 'fly');
+ok('a live link that is not a web address is dropped', byName('sneaky').live_url === null);
+ok('the most urgent job in flight speaks for the project', byName('web').busy?.status === 'paused');
+ok('a run counts as activity, not just a push', byName('cli').touched > byName('web').touched);
+
+ok('languages are counted, most used first',
+  JSON.stringify(languages(cat)) === '[["Go",2]]', JSON.stringify(languages(cat)));
+ok('the tally adds up', JSON.stringify(tally(cat))
+  === JSON.stringify({ total: 5, live: 2, onGitHub: 3, localOnly: 1 }), JSON.stringify(tally(cat)));
+ok('the live filter keeps what is live',
+  narrow(cat, { filter: 'live' }).map((e) => e.name).sort().join() === 'cli,web');
+ok('a search is not case-sensitive', narrow(cat, { query: 'ZED' }).length === 1);
+ok('A–Z ignores case', order(cat, 'name').map((e) => e.name).join() === 'cli,fresh,sneaky,web,Zed',
+  order(cat, 'name').map((e) => e.name).join());
+ok('recent puts work in flight first',
+  order(cat).slice(0, 2).map((e) => e.name).sort().join() === 'fresh,web');
+
+ok('an address prints without its scheme or trailing slash',
+  liveHost('https://me.github.io/site/') === 'me.github.io/site' && liveHost('https://a.fly.dev/') === 'a.fly.dev');
+ok('only http and https become links',
+  webUrl('https://a.dev') === 'https://a.dev' && webUrl('javascript:alert(1)') === null
+  && webUrl('data:text/html,x') === null && webUrl(null) === null);
+ok('a link with a quote in it is refused', webUrl('https://a.dev/"onmouseover="x') === null);
 
 // ── 19. markdown unit checks ──────────────────────────────────────────
 

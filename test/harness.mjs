@@ -25,6 +25,7 @@ export function seed() {
       id: 'j2', project_slug: 'alpha', prompt: 'add a <script>alert(1)</script> high-score list',
       status: 'done', created_at: iso(240), claimed_at: iso(239), effort: 'high',
       usage_cap_pct: 90, num_turns: 14, repo_url: 'https://github.com/me/alpha',
+      live_url: 'https://alpha.fly.dev/',
     },
     {
       id: 'j3', project_slug: 'beta', prompt: 'weather site for my city', status: 'error',
@@ -37,11 +38,20 @@ export function seed() {
     },
   ];
 
+  // The catalogue columns are what the host fills in from GitHub, the README
+  // and Fly: one project live on Fly, one on Pages, one with markup in its
+  // description, and one with nothing to say for itself.
   fake.tables.projects = [
-    { name: 'alpha', full_name: 'me/alpha', is_local: true, private: true, pushed_at: iso(5) },
-    { name: 'beta', full_name: 'me/beta', is_local: false, private: false, pushed_at: iso(60) },
-    { name: 'gamma', full_name: null, is_local: true, private: false, pushed_at: iso(90) },
-    { name: 'untouched-repo', full_name: 'me/untouched-repo', is_local: false, private: true, pushed_at: iso(900) },
+    { name: 'alpha', full_name: 'me/alpha', is_local: true, private: true, pushed_at: iso(5),
+      description: 'A snake game for the browser, with a high-score list.',
+      language: 'JavaScript', live_url: 'https://alpha.fly.dev/', live_kind: 'fly' },
+    { name: 'beta', full_name: 'me/beta', is_local: false, private: false, pushed_at: iso(60),
+      description: 'Weather for <my> city', language: 'TypeScript', topics: ['forecast'] },
+    { name: 'gamma', full_name: null, is_local: true, private: false, pushed_at: iso(90),
+      description: null, language: null },
+    { name: 'untouched-repo', full_name: 'me/untouched-repo', is_local: false, private: true,
+      pushed_at: iso(900), description: 'Notes, kept in markdown.', language: 'TypeScript',
+      stars: 3, live_url: 'https://me.github.io/untouched-repo/', live_kind: 'pages' },
   ];
 
   fake.tables.usage_windows = [
