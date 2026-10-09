@@ -1232,14 +1232,22 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 }
 .profile-h svg { width: 13px; height: 13px; }
 
-/* The sidebar door carries the size of the list behind it. */
-#ideas-link { justify-content: center; gap: .45rem; }
-#ideas-link .count {
+/* The two doors under "New project", side by side. Each carries the size of
+   the list behind it, and the one you are behind wears the accent — the same
+   treatment as the open project in the list below. */
+.nav-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
+.nav-pair .btn { justify-content: center; gap: .4rem; padding-inline: .5rem; min-width: 0; }
+.nav-pair .count {
   padding: .02rem .32rem;
   background: var(--surface-2); border-radius: var(--r-full);
   font-size: 10.5px; font-weight: 650; color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.nav-pair .count:empty { display: none; }
+.nav-pair .btn[aria-current="page"] {
+  background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text);
+}
+.nav-pair .btn[aria-current="page"] .count { background: var(--surface); color: var(--accent-text); }
 
 .filter-row {
   display: flex; flex-wrap: wrap; gap: .35rem;
@@ -1324,6 +1332,70 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   background: var(--surface-2); border-color: var(--line); color: var(--muted);
 }
 .idea[data-kind="opener"] .idea-why svg { color: var(--muted); }
+
+/* ── projects ───────────────────────────────────────────────────────── */
+/* Everything you have, a card each. The live link is the line you came for,
+   so it gets one of its own; it wears the accent because it is a link, not
+   because it encodes anything. Language is a word, never a colour. */
+.proj-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  margin-bottom: .8rem;
+}
+.proj-tools .search { flex: 1 1 13rem; }
+.proj-tools .search input { background: var(--surface); }
+.proj-tools .segmented { flex: none; }
+
+.proj-grid { display: grid; gap: .55rem; }
+@media (min-width: 680px) { .proj-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.proj {
+  display: grid; gap: .35rem; align-content: start; min-width: 0;
+  padding: .8rem .85rem .75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-1) ease;
+}
+.proj:hover { border-color: var(--line-strong); }
+
+.proj-top { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.proj-name {
+  flex: 1; min-width: 0;
+  font-size: 14.5px; font-weight: 600; letter-spacing: -.01em;
+  color: var(--text); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.proj-name:hover { text-decoration: underline; }
+.proj-tags { display: flex; flex-wrap: wrap; gap: .25rem; }
+
+.proj-desc {
+  margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-2);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.proj-desc.none { color: var(--muted); font-style: italic; }
+
+.proj-facts {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .1rem .4rem;
+  margin: 0; font-size: 11.5px; color: var(--muted);
+}
+.proj-facts [data-ago] { font-variant-numeric: tabular-nums; }
+
+.proj-live {
+  display: flex; align-items: center; gap: .35rem; min-width: 0;
+  margin: .15rem 0 0; padding-top: .5rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px; font-weight: 570; color: var(--accent-text);
+  text-decoration: none;
+}
+.proj-live span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-live svg { width: 14px; height: 14px; flex: none; }
+a.proj-live svg:last-child { width: 12px; height: 12px; opacity: .8; }
+a.proj-live:hover span { text-decoration: underline; }
+.proj-live.none { color: var(--muted); font-weight: 500; }
+
+.proj-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .1rem; }
 
 /* ── toasts, dialog, offline bar ────────────────────────────────────── */
 .toasts {
@@ -1456,7 +1528,7 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 /* ── forced colours ─────────────────────────────────────────────────── */
 @media (forced-colors: active) {
   .card, .row, .tile, .msg.agent, .composer-box, .hero-card,
-  .suggest, .suggest-icon { border: 1px solid CanvasText; }
+  .suggest, .suggest-icon, .proj { border: 1px solid CanvasText; }
   .meter-fill, .bar { background: Highlight; forced-color-adjust: none; }
   .bar-col.today .bar { background: CanvasText; }
   .dot { outline: 1px solid CanvasText; }

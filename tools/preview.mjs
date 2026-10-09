@@ -5,7 +5,7 @@
 //   node --import ./test/register.mjs tools/preview.mjs home dark
 //
 // Writes preview/<view>-<theme>.html.
-// Views: home · chat · new · ideas · auth · empty.
+// Views: home · chat · new · ideas · projects · auth · empty.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fake } from '../test/fake-supabase.mjs';
@@ -13,7 +13,7 @@ import { seed, makeWindow, tick, root } from '../test/harness.mjs';
 
 const [view = 'home', theme = 'light'] = process.argv.slice(2);
 const HASH = {
-  home: '#/', chat: '#/p/alpha', new: '#/new', ideas: '#/ideas',
+  home: '#/', chat: '#/p/alpha', new: '#/new', ideas: '#/ideas', projects: '#/projects',
   auth: '#/', empty: '#/',
 };
 if (!(view in HASH)) {

@@ -24,7 +24,7 @@ const STARTERS = [
   'Build a snake game I can play in the browser, with a high-score list.',
   'A CLI that watches a folder and converts any new image to WebP.',
   'A small REST API for tracking books I have read, with SQLite behind it.',
-  'A static site that shows the weather for my city, deployed to GitHub Pages.',
+  'A static site that shows the weather for my city, live on the web.',
 ];
 
 /**
@@ -86,11 +86,14 @@ const RECIPES = [
     kind: 'deploy',
     icon: 'rocket',
     weight: 50,
-    when: (p) => p.done && p.has.web && !p.has.deploy,
+    // The host's own record beats the keyword probe: a live link means it is
+    // deployed, whatever the prompts did or didn't say.
+    when: (p) => p.done && p.has.web && !p.has.deploy && !p.live && p.remote,
     title: (p) => `Put ${p.slug} online`,
     why: () => 'it runs in a browser but nothing is deployed',
-    prompt: () => 'Deploy this to GitHub Pages with an action that publishes on every push '
-      + 'to main, then put the live link at the top of the README.',
+    prompt: () => 'Put this online: prepare it for Fly.io with a Dockerfile and a fly.toml, '
+      + 'so the desktop deploys it when this run finishes. Say in the README that it is '
+      + 'deployed to Fly.io.',
   },
   {
     kind: 'review',
@@ -134,6 +137,7 @@ function digest(slug, jobs, projects, summaries) {
     done: thread.some((j) => j.status === 'done'),
     local: Boolean(project?.is_local),
     remote: Boolean(project?.full_name),
+    live: Boolean(project?.live_url) || thread.some((j) => j.live_url),
     has: Object.fromEntries(Object.entries(PROBES).map(([k, re]) => [k, re.test(corpus)])),
   };
 }

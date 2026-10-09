@@ -31,6 +31,13 @@ drives Claude Code lives on the PC.
   "games: alpha · command-line tools: gamma · browser apps: beta" — then offers
   builds that follow from it, each citing the projects that earned it a place.
   See [Where the ideas come from](#where-the-ideas-come-from).
+- **Every project, and where it's live** — `#/projects` lists every repo on
+  your GitHub account and every folder on your desktop, one card each: what it
+  is, its language, when it last moved, how many runs it has had, and its live
+  link if it has one. Search, filter by language or to what's live, sort by
+  recent or A–Z. A web project built from here is put on Fly.io when its run
+  finishes, so its link shows up without you doing anything.
+  See [Where the projects come from](#where-the-projects-come-from).
 - **Limits that say *when*** — a meter per window with the percentage, the
   headroom left, the severity in a word, and the reset as a **day and a time**
   with a live countdown: "resets Sat 6:20 p.m. · in 2d 19h". The tightest window
@@ -140,9 +147,9 @@ From those it builds four kinds of thing:
 - **Combos** — offered only when both halves are things you have actually
   built. Games *and* charts gets you a leaderboard with charts; a CLI *and* an
   API gets you a CLI that drives it.
-- **Shape** — what the account looks like from above: three projects and no
-  index, two that exist only on your desktop, two with nothing tested, two runs
-  that failed. These cite the count, not a project.
+- **Shape** — what the account looks like from above: two projects that exist
+  only on your desktop, two with nothing tested, two runs that failed. These
+  cite the count, not a project.
 - **Openers** — only when there is genuinely nothing to read off. A fallback,
   not padding: once there are real ideas, openers would only dilute them.
 
@@ -154,6 +161,31 @@ Same caveats as the suggestions, and one more: a theme only registers if it came
 up *in words*. A project whose topic was never written down anywhere won't be
 counted, which is why the view opens by showing you exactly what it did read.
 
+## Where the projects come from
+
+The desktop runner writes them. Every few minutes it lists your GitHub repos and
+the folders in its workspace into the `projects` table, and for each one fills
+in what this screen shows:
+
+| Field | Read from |
+|---|---|
+| description | the GitHub description, or else the README's first real paragraph |
+| language | GitHub's primary language |
+| live link | the repo's homepage, else a deployed Fly app its `fly.toml` names, else GitHub Pages |
+
+`catalog.js` adds the dashboard's own half — the runs each project has had, and
+whether one is in flight — and a project being built right now gets a card
+before the runner has listed it. A finished job re-reads the list, because the
+runner deploys and re-syncs before it marks a job done: the new live link is
+already there.
+
+A **site** button appears on a project's chat header, and on the reply whose
+run deployed it. A live link only ever becomes a link if it is `http(s)://`.
+
+The description and live-link columns come from the "project catalogue" block
+of the runner's `supabase/schema.sql`. Without it the screen still lists every
+project, it just has less to say about each.
+
 ## Tests
 
 ```sh
@@ -163,7 +195,8 @@ npm run contrast    # just the colour claims
 
 Boots the real app in jsdom against a fake Supabase and walks the screens: sign
 in, home, a project thread, sending a follow-up, stopping a run, a job finishing
-over realtime, the new-project flow, the ideas view and its filters, re-reading
+over realtime, the new-project flow, the ideas view and its filters, the
+projects view with its search, filters and sort, re-reading
 and failing to read the limits, clearing a chat, the drawer, keyboard shortcuts,
 theming, and the Markdown renderer. It also checks the static invariants a
 vanilla app has no compiler for — every `$('id')` exists in the HTML, every icon
@@ -171,13 +204,15 @@ referenced is in the sprite, every module is listed in the service-worker shell,
 and the recurring timer still re-reads usage (it stopped once, and nothing else
 in here would have noticed).
 
-Three things get unit coverage against fixed inputs rather than fixtures,
+Four things get unit coverage against fixed inputs rather than fixtures,
 because a plausible-looking wrong answer is worse there than a crash: the reset
 labels (`dayClock`, `until`, `span` — a weekly limit must never claim it resets
 this afternoon), the suggestion engine (a busy project is left alone, a lost one
-is never offered, the list spans your projects) and the idea engine (a theme is
-only claimed when the words are there, a combo needs both halves, openers never
-pad out a list that has real ideas).
+is never offered, the list spans your projects, a live one is not asked to
+deploy), the idea engine (a theme is only claimed when the words are there, a
+combo needs both halves, openers never pad out a list that has real ideas) and
+the project catalogue (a lost project stays out, a deploy shows before the next
+sync, a link that isn't a web address never becomes one).
 
 `npm run contrast` is the other half of the net. It parses the tokens out of
 `style.css` and asserts the claims this README makes about them: every ink
@@ -199,8 +234,8 @@ npm run preview -- home dark
 
 Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
-Supabase project at all. Views: `home`, `chat`, `new`, `ideas`, `auth`, `empty`.
-Themes: `light`, `dark`. (`preview/` is gitignored.)
+Supabase project at all. Views: `home`, `chat`, `new`, `ideas`, `projects`,
+`auth`, `empty`. Themes: `light`, `dark`, `mobile`. (`preview/` is gitignored.)
 
 To screenshot one headlessly:
 
@@ -222,6 +257,7 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `views.js` | Rendering. Reads state, writes DOM; never queries |
 | `suggest.js` | The next step for a project you have, read off its thread. Pure |
 | `ideas.js` | Whole new projects, read off the themes your work shows. Pure |
+| `catalog.js` | The Projects screen's model: every project, its runs, its live link. Pure |
 | `router.js` | Hash routing |
 | `ui.js` | Theme, drawer, toasts, confirm dialog, the one-second ticker |
 | `md.js` | A small Markdown subset, escape-first so output is safe |
@@ -238,10 +274,10 @@ the signed-in user:
 
 | Table | Columns used |
 |---|---|
-| `jobs` | `id, owner, prompt, mode, project_slug, repo_visibility, effort, usage_cap_pct, status, created_at, claimed_at, resume_at, num_turns, repo_url, error, cancel_requested` |
+| `jobs` | `id, owner, prompt, mode, project_slug, repo_visibility, effort, usage_cap_pct, status, created_at, claimed_at, resume_at, num_turns, repo_url, live_url, error, cancel_requested` |
 | `job_events` | `id, job_id, kind, text` — `kind` is one of `tool`, `assistant`, `status`, `error`, `result` |
 | `usage_windows` | `window_type, pct, resets_at` |
-| `projects` | `name, full_name, is_local, private, pushed_at` |
+| `projects` | `name, full_name, is_local, private, pushed_at`, and from the catalogue migration `description, language, topics, stars, is_fork, is_archived, live_url, live_kind` |
 | `hosts` | `name, last_seen` |
 
 A job's `status` is `queued`, `running`, `paused`, `done` or `error`. A desktop
@@ -307,4 +343,5 @@ counts as online if its `last_seen` is under 30 seconds old.
 | `/` | Focus the composer |
 | `n` | New project |
 | `i` | Ideas |
+| `p` | Projects |
 | `Esc` | Close the drawer, the options panel, or unfocus the composer |

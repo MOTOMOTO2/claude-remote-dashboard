@@ -83,10 +83,16 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
         New project
       </button>
-      <a id="ideas-link" class="btn ghost block" href="#/ideas">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
-        Ideas<span id="ideas-count" class="count"></span>
-      </a>
+      <div class="nav-pair">
+        <a id="projects-link" class="btn ghost" href="#/projects">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
+          Projects<span id="projects-count" class="count"></span>
+        </a>
+        <a id="ideas-link" class="btn ghost" href="#/ideas">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
+          Ideas<span id="ideas-count" class="count"></span>
+        </a>
+      </div>
       <div class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
         <input id="project-search" type="search" placeholder="Search projects"
@@ -292,6 +298,46 @@
         <p class="empty-note center">Every one of these is read off your own
            projects, in the page, by a handful of rules. Tapping one loads the
            brief into the composer; you still press send.</p>
+      </section>
+
+      <!-- ── projects ──────────────────────────────────────── -->
+      <section id="projects-view" class="view" hidden>
+        <div class="intro">
+          <svg class="intro-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
+          <h2 class="intro-h">Everything you’ve built</h2>
+          <p id="projects-intro" class="intro-p"></p>
+        </div>
+
+        <div id="projects-tools" class="proj-tools">
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
+            <input id="projects-search" type="search" autocomplete="off"
+                   placeholder="Name, description, language" aria-label="Search projects">
+          </label>
+          <div id="projects-sort" class="segmented" role="radiogroup" aria-label="Sort projects">
+            <label><input type="radio" name="proj-sort" value="recent" checked><span>Recent</span></label>
+            <label><input type="radio" name="proj-sort" value="name"><span>A–Z</span></label>
+          </div>
+        </div>
+
+        <div id="projects-filters" class="filter-row" role="group" aria-label="Filter projects"></div>
+
+        <div id="projects-grid" class="proj-grid"></div>
+
+        <p id="projects-none" class="empty-note center" hidden>
+          Nothing matches — try another search or filter.
+        </p>
+
+        <div id="projects-empty" class="empty" hidden>
+          <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
+          <h3>No projects yet</h3>
+          <p>Your desktop lists every repo on your GitHub account and every folder in
+             its workspace here, a few minutes after it starts.</p>
+        </div>
+
+        <p class="empty-note center">Read off GitHub and your desktop every few
+           minutes. A new web project is put on Fly.io when its run finishes, and
+           its link shows up here.</p>
       </section>
 
       <!-- ── new project ───────────────────────────────────── -->

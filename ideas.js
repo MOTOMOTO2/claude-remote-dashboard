@@ -429,18 +429,7 @@ const COMBOS = [
  * sort of thing you only notice when you can see everything at once.
  */
 const SHAPE = [
-  {
-    slugId: 'project-index',
-    icon: 'folder', tags: ['web', 'portfolio'],
-    when: (a) => a.projects.length >= 3,
-    title: 'A front door linking every project you have built',
-    why: (a) => `${plural(a.projects.length, 'project')} and no index`,
-    blurb: 'One page that lists them all, with what each one is and whether it runs.',
-    prompt: 'Build a single page that indexes every project I have: name, one-line '
-      + 'description, language, last push, and a live link where there is one. Read the list '
-      + 'from the GitHub API at build time so it does not go stale, and deploy it to Pages '
-      + 'with an action that rebuilds weekly.',
-  },
+  // No "index of every project" here any more: the Projects screen is one.
   {
     slugId: 'push-everything',
     icon: 'upload', tags: ['cli', 'git'],
@@ -510,8 +499,7 @@ const OPENERS = [
     title: 'A weather page for your city, deployed',
     blurb: 'One place, one glance, live on the internet rather than on your desktop.',
     prompt: 'Build a static page showing the weather for my city — now, today’s range, and '
-      + 'the next three days — from a free API, and deploy it to GitHub Pages with an action '
-      + 'that publishes on every push to main.',
+      + 'the next three days — from a free API, ready to go live on the web.',
   },
 ];
 

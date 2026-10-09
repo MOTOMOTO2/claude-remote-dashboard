@@ -85,16 +85,19 @@ function draw() {
   $('chat-view').hidden = !(v === 'project' || v === 'pending');
   $('new-view').hidden = v !== 'new';
   $('ideas-view').hidden = v !== 'ideas';
-  $('composer').hidden = v === 'home' || v === 'ideas';
+  $('projects-view').hidden = v !== 'projects';
+  $('composer').hidden = v === 'home' || v === 'ideas' || v === 'projects';
   $('visibility-wrap').hidden = v === 'project';
 
   views.renderTopbar();
   views.renderSidebar();
   views.renderUsage();
   views.renderIdeaBadge();
+  views.renderProjectBadge();
   // Only two views show them, and they read the whole account to work it out.
   if (v === 'home' || v === 'new') views.renderSuggestions();
   if (v === 'ideas') views.renderIdeas();
+  if (v === 'projects') views.renderProjects();
 
   if (v === 'home') views.renderHome();
   if (v === 'project') views.renderChat();
@@ -160,11 +163,21 @@ $('menu-close').addEventListener('click', closeDrawer);
 $('scrim').addEventListener('click', closeDrawer);
 $('new-project').addEventListener('click', () => { go('#/new'); closeDrawer(); focusPrompt(); });
 $('ideas-link').addEventListener('click', closeDrawer);
+$('projects-link').addEventListener('click', closeDrawer);
 $('home-new').addEventListener('click', () => { go('#/new'); focusPrompt(); });
 
 $('project-search').addEventListener('input', (e) => {
   views.setFilter(e.target.value);
   views.renderSidebar();
+});
+
+$('projects-search').addEventListener('input', (e) => {
+  views.setProjectQuery(e.target.value);
+  views.renderProjects();
+});
+$('projects-sort').addEventListener('change', (e) => {
+  views.setProjectSort(e.target.value);
+  views.renderProjects();
 });
 
 $('host-badge').addEventListener('click', () => toast(views.hostExplainer(), { glyph: 'auto', ms: 4000 }));
@@ -275,13 +288,19 @@ $('composer').addEventListener('submit', async (e) => {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter]');
   if (!btn) return;
   const d = btn.dataset;
 
   if (d.ideaFilter) {
     views.setIdeaFilter(d.ideaFilter);
     views.renderIdeas();
+    return;
+  }
+
+  if (d.projectFilter) {
+    views.setProjectFilter(d.projectFilter);
+    views.renderProjects();
     return;
   }
 
@@ -366,6 +385,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/' && !$('composer').hidden) { e.preventDefault(); prompt.focus(); }
   if (e.key === 'n') { e.preventDefault(); go('#/new'); focusPrompt(); }
   if (e.key === 'i') { e.preventDefault(); go('#/ideas'); }
+  if (e.key === 'p') { e.preventDefault(); go('#/projects'); }
 });
 
 // password reveal
@@ -401,6 +421,9 @@ $('auth-form').addEventListener('submit', async (e) => {
 store.on('change', scheduleRender);
 store.on('event', (ev) => views.appendLive(ev, scheduleRender));
 store.on('finish', (job) => {
+  // The host deploys and re-syncs before it marks a job done, so the new repo
+  // or live link is already there to read.
+  store.loadProjects();
   const name = job.project_slug ?? firstLine(job.prompt);
   if (job.status === 'done') {
     toast(`${name} finished`, { glyph: 'check' });
