@@ -614,6 +614,7 @@ has('the pips say the same thing in words',
   el('fleet-pips').getAttribute('aria-label'), '2 of 3 slots busy');
 has('the block heading counts the busy slots', text('slots-note'), '2 of 3 busy');
 has('the hint says what the number does', text('slots-hint'), 'up to 3 agents at once');
+has('and admits nothing has been published yet', text('slots-hint'), 'Not published yet');
 has('and how much room is left', text('slots-hint'), '1 slot free');
 
 ok('the queued job is waiting', el('waiting-list').querySelectorAll('.row').length === 1);
@@ -672,12 +673,12 @@ fake.failTable('settings', 'relation "public.settings" does not exist');
 await store.pollSettings();
 await tick();
 has('a missing settings table is explained, not swallowed',
-  text('slots-hint'), 'only on this device');
+  text('slots-hint'), 'Saved on this device only');
 fake.failTable('settings', null);
 await store.pollSettings();
 await tick();
 ok('and the claim comes back when it can be published',
-  !text('slots-hint').includes('only on this device'));
+  !text('slots-hint').includes('this device only'));
 
 // One agent per project: a job for a project that is already busy says so.
 const queuedGamma = {
@@ -901,6 +902,16 @@ ok('a filter that outlived its theme is dropped, not obeyed',
 ok('it still offers somewhere to start',
   el('ideas-grid').querySelectorAll('.idea[data-kind="opener"]').length > 0);
 ok('with no carry-on block at all', el('ideas-next-block').hidden);
+
+window.location.hash = '#/agents';
+await tick();
+ok('the fleet screen survives an empty account', !el('agents-view').hidden);
+ok('with nothing running', text('fleet-value') === '0');
+ok('it says so rather than showing an empty list', !el('fleet-empty').hidden);
+ok('there is no queue', el('waiting-block').hidden);
+ok('nothing to stop', el('stop-all').hidden);
+ok('and the tab badge goes away', el('tab-agents-count').hidden);
+ok('but the slots are still there to set', el('slots').querySelectorAll('input').length === 6);
 
 window.location.hash = '#/projects';
 await tick();
