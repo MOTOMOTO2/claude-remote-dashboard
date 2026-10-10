@@ -174,6 +174,15 @@ function takeSettings({ data, error }) {
   }
 }
 
+/**
+ * Re-read the ceiling. It is one row and it can be changed from another
+ * phone, so it rides the same timer as the host and the limits.
+ */
+export async function pollSettings() {
+  takeSettings(await settingsQuery());
+  changed();
+}
+
 /** Publish the ceiling. Optimistic: the pips move now, the row follows. */
 export async function saveMaxParallel(n) {
   const value = clampSlots(n);

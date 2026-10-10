@@ -540,9 +540,14 @@ async function applySession(session) {
   await store.loadAll(route.slug);
   store.subscribe();
   store.pollHost();
-  // Usage rides the same timer as the host. Realtime on `usage_windows` is a
-  // bonus; this poll is what actually keeps the meters honest.
-  hostTimer = setInterval(() => { store.pollHost(); store.pollUsage(); }, 10_000);
+  // Usage and the agent ceiling ride the same timer as the host. Realtime on
+  // `usage_windows` is a bonus; this poll is what keeps the meters honest,
+  // and the ceiling can be raised from whichever device is in your hand.
+  hostTimer = setInterval(() => {
+    store.pollHost();
+    store.pollUsage();
+    store.pollSettings();
+  }, 10_000);
   tickTimer = startTicker();
   if (route.view === 'project' || route.view === 'pending') scrollToEnd('auto');
 }
