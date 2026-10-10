@@ -16,6 +16,7 @@
     { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
   ],
   "shortcuts": [
-    { "name": "New project", "url": "#/new" }
+    { "name": "New project", "url": "#/new" },
+    { "name": "Agents", "url": "#/agents" }
   ]
 }
