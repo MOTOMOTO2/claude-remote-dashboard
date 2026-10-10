@@ -1,23 +1,30 @@
 // A stand-in for @supabase/supabase-js, big enough for the query shapes the
 // dashboard actually uses: select/order/limit/in, insert().select().single(),
-// update().eq(), delete().eq(), auth, and realtime channels.
+// update().eq(), upsert({ onConflict }), delete().eq(), auth, and realtime
+// channels.
 
 export const fake = {
   session: null,
-  tables: { jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [] },
+  tables: {
+    jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
+  },
   /** table -> error, so a read can be made to fail the way a real one does. */
   failures: {},
   inserts: [],
   updates: [],
+  upserts: [],
   deletes: [],
   channels: [],
   authCallbacks: [],
 
   reset() {
-    this.tables = { jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [] };
+    this.tables = {
+      jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
+    };
     this.failures = {};
     this.inserts = [];
     this.updates = [];
+    this.upserts = [];
     this.deletes = [];
     this.channels = [];
     this.authCallbacks = [];
@@ -99,6 +106,19 @@ class Query {
     fake.tables[this.table].push(stored);
     this.rows = [stored];
     Promise.resolve().then(() => fake.emit(this.table, 'INSERT', stored));
+    return this;
+  }
+
+  /** Insert or merge on one key — how a per-owner settings row is written. */
+  upsert(row, opts = {}) {
+    this.mode = 'upsert';
+    const key = opts.onConflict ?? 'id';
+    const table = (fake.tables[this.table] ??= []);
+    const found = table.find((r) => r[key] === row[key]);
+    if (found) Object.assign(found, row);
+    else table.push({ ...row });
+    fake.upserts.push({ table: this.table, row, onConflict: key });
+    this.rows = [found ?? row];
     return this;
   }
 

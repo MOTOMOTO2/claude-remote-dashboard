@@ -571,6 +571,143 @@ ok('then whatever moved last', shownNames().slice(3).join() === 'beta,untouched-
 projChip('lang:JavaScript').click();
 await tick();
 
+// ── 10d. the agents view ──────────────────────────────────────────────
+// Several agents at once is the whole point of this screen, so the checks
+// are about the arithmetic it prints: who holds a slot, how many are left,
+// and what each queued job is actually waiting for.
+
+const store = await import('../store.js');
+
+window.location.hash = '#/agents';
+await tick();
+
+ok('the agents view is shown', !el('agents-view').hidden);
+ok('every other view steps aside there',
+  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden
+  && el('ideas-view').hidden && el('projects-view').hidden);
+ok('the composer is out of the way', el('composer').hidden);
+ok('the bottom tabs stay put where there is no composer', !el('tabbar').hidden);
+has('the topbar names it', text('view-title'), 'Agents');
+has('the topbar counts the running agents against the ceiling',
+  text('view-sub'), '1 of 3 running');
+ok('its sidebar door is marked current', el('agents-link').getAttribute('aria-current') === 'page');
+ok('and its tab is too', el('tab-agents').getAttribute('aria-current') === 'page');
+
+// delta is running, gamma is paused and holding its slot, alpha is queued.
+ok('the hero counts what is running', text('fleet-value') === '1', text('fleet-value'));
+ok('an agent in flight gets a card each',
+  el('fleet-list').querySelectorAll('.agent').length === 2,
+  String(el('fleet-list').querySelectorAll('.agent').length));
+ok('the empty note stays out of the way', el('fleet-empty').hidden);
+has('a card names the project', el('fleet-list').textContent, 'delta');
+has('a paused agent says it keeps its slot', el('fleet-list').textContent, 'keeps its slot');
+ok('every card can be stopped',
+  el('fleet-list').querySelectorAll('[data-cancel]').length === 2);
+ok('and every card opens its thread',
+  [...el('fleet-list').querySelectorAll('.agent-name')]
+    .every((a) => /#\/(p|j)\//.test(a.getAttribute('href'))));
+
+ok('there is a pip per slot', el('fleet-pips').querySelectorAll('.pip').length === 3,
+  String(el('fleet-pips').querySelectorAll('.pip').length));
+ok('two of them are taken', el('fleet-pips').querySelectorAll('.pip.on').length === 2);
+has('the pips say the same thing in words',
+  el('fleet-pips').getAttribute('aria-label'), '2 of 3 slots busy');
+has('the block heading counts the busy slots', text('slots-note'), '2 of 3 busy');
+has('the hint says what the number does', text('slots-hint'), 'up to 3 agents at once');
+has('and how much room is left', text('slots-hint'), '1 slot free');
+
+ok('the queued job is waiting', el('waiting-list').querySelectorAll('.row').length === 1);
+has('and says it is next, since a slot is free', el('waiting-list').textContent, 'next up');
+has('the doors carry the number in flight', text('agents-count'), '3');
+ok('including the tab badge', text('tab-agents-count') === '3' && !el('tab-agents-count').hidden);
+ok('finished runs are listed under them',
+  el('fleet-done').querySelectorAll('.row').length === 3);
+
+// A second agent starts while you watch — the case this screen exists for.
+const extra = {
+  id: 'par-1', project_slug: 'epsilon', prompt: 'write the docs site', status: 'running',
+  created_at: iso(3), claimed_at: iso(2), effort: 'high', usage_cap_pct: 90,
+};
+fake.tables.jobs.push(extra);
+fake.emit('jobs', 'INSERT', extra);
+await tick();
+ok('a second agent joins the first', text('fleet-value') === '2', text('fleet-value'));
+ok('and gets a card of its own', el('fleet-list').querySelectorAll('.agent').length === 3);
+ok('every slot is taken now', el('fleet-pips').querySelectorAll('.pip.on').length === 3);
+has('so the queue is waiting on a slot, not on the desktop',
+  el('waiting-list').textContent, 'waiting for a free slot');
+has('the hero says the fleet is full', el('fleet-chips').textContent, '3 of 3 slots busy');
+
+// A log line from any live agent reaches this screen, not just a thread.
+fake.emit('job_events', 'INSERT', { id: 20, job_id: 'par-1', kind: 'tool', text: 'Write docs/index.md' });
+await tick();
+has('a live log line lands on the card', el('fleet-list').textContent, 'Write docs/index.md');
+
+// The ceiling is a row in Supabase, so it follows you between devices.
+fake.tables.settings = [{ owner: 'u1', max_parallel: 5 }];
+await store.pollSettings();
+await tick();
+ok('a ceiling set elsewhere is picked up',
+  el('slots').querySelector('input[value="5"]').checked);
+has('and the hint counts against it', text('slots-hint'), 'up to 5 agents at once');
+
+// Changing it publishes it where the runner looks.
+const setSlots = async (n) => {
+  const r = el('slots').querySelector(`input[value="${n}"]`);
+  r.checked = true;
+  r.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick();
+};
+await setSlots(2);
+const wrote = fake.upserts.at(-1);
+ok('the ceiling is written to the settings table', wrote?.table === 'settings');
+ok('with the number you picked', wrote?.row.max_parallel === 2, JSON.stringify(wrote?.row));
+ok('one row per account, keyed on the owner',
+  wrote?.onConflict === 'owner' && wrote?.row.owner === 'u1');
+has('three in flight against a ceiling of two is reported, not hidden',
+  el('fleet-chips').textContent, 'over the ceiling');
+
+// Without the migration the number is only local, and the screen says so.
+fake.failTable('settings', 'relation "public.settings" does not exist');
+await store.pollSettings();
+await tick();
+has('a missing settings table is explained, not swallowed',
+  text('slots-hint'), 'only on this device');
+fake.failTable('settings', null);
+await store.pollSettings();
+await tick();
+ok('and the claim comes back when it can be published',
+  !text('slots-hint').includes('only on this device'));
+
+// One agent per project: a job for a project that is already busy says so.
+const queuedGamma = {
+  id: 'q-gamma', project_slug: 'gamma', prompt: 'add tests to the CLI',
+  status: 'queued', created_at: iso(1),
+};
+fake.tables.jobs.push(queuedGamma);
+fake.emit('jobs', 'INSERT', queuedGamma);
+await tick();
+ok('both queued jobs are listed', el('waiting-list').querySelectorAll('.row').length === 2);
+has('and one is waiting for its own project, not for a slot',
+  el('waiting-list').textContent, 'waiting for gamma to finish');
+
+// Stopping the lot, once there is a lot to stop.
+ok('stop all is offered', !el('stop-all').hidden);
+const before = fake.updates.filter((u) => u.patch?.cancel_requested).length;
+el('stop-all').click();
+await tick();
+if (el('confirm').open) el('confirm-yes').click();
+await tick();
+const stopped = fake.updates.filter((u) => u.patch?.cancel_requested).length - before;
+ok('stop all asks every open agent to stop', stopped === 5, `stopped ${stopped}`);
+
+// Put the fixtures back the way the later sections expect them.
+for (const id of ['par-1', 'q-gamma']) {
+  fake.tables.jobs = fake.tables.jobs.filter((j) => j.id !== id);
+  fake.emit('jobs', 'DELETE', null, { id });
+}
+await tick();
+
 // ── 11. clearing a chat ───────────────────────────────────────────────
 
 window.location.hash = '#/p/beta';
@@ -633,6 +770,70 @@ await tick();
 ok('"p" opens the projects', window.location.hash === '#/projects');
 window.location.hash = '#/';
 await tick();
+
+// ── 13b. the same screens on a phone ──────────────────────────────────
+// Three things are decided in JS rather than CSS, because they are about
+// how much there is rather than how wide it is: home's reference blocks,
+// which limit leads, and how much log a card shows.
+
+screen.width = 390;
+window.location.hash = '#/';
+await tick();
+window.dispatchEvent(new window.Event('resize'));
+await tick();
+
+ok('the bottom tabs are there', !el('tabbar').hidden);
+ok('home is on its own tab', el('tab-home').getAttribute('aria-current') === 'page');
+ok('the reference blocks are folded away', el('home-more').hidden);
+ok('and the toggle that opens them is offered', !el('home-more-toggle').hidden);
+has('which says what it would do', text('home-more-label'), 'More detail');
+el('home-more-toggle').click();
+await tick();
+ok('tapping it unfolds them', !el('home-more').hidden);
+has('and the label flips', text('home-more-label'), 'Less detail');
+ok('the strip is in there, not dropped', !el('activity-block').hidden);
+
+// The limits block leads with the window that will actually stop you.
+const phoneMeters = [...el('usage-home').querySelectorAll('.meter')];
+has('the tightest window leads on a phone',
+  el('usage-home').querySelector('.meter-name').textContent, 'all models');
+const fold = el('usage-home').querySelector('details.fold');
+ok('the rest fold behind their own count', Boolean(fold));
+has('and the fold says how many', fold?.textContent ?? '', '2 more windows');
+ok('nothing is dropped, only folded', phoneMeters.length === 3, String(phoneMeters.length));
+
+// The composer and the tabs never fight over the bottom of the window.
+window.location.hash = '#/p/alpha';
+await tick();
+ok('a thread gets the composer', !el('composer').hidden);
+ok('and the tabs step aside for it', el('tabbar').hidden);
+
+window.location.hash = '#/agents';
+await tick();
+ok('the fleet gets the tabs back', !el('tabbar').hidden && el('composer').hidden);
+
+// A card carries the tail of its own log, and a phone gets less of it.
+for (const n of [1, 2, 3]) {
+  fake.emit('job_events', 'INSERT',
+    { id: 30 + n, job_id: made.id, kind: 'tool', text: `Edit file${n}.js` });
+}
+await tick();
+const tail = () => el('fleet-list').querySelector('.agent-tail');
+ok('a card carries the tail of its log', Boolean(tail()));
+ok('two lines of it on a phone', tail()?.children.length === 2,
+  String(tail()?.children.length));
+has('the newest line is one of them', tail()?.textContent ?? '', 'Edit file3.js');
+
+screen.width = 1200;
+window.dispatchEvent(new window.Event('resize'));
+await tick();
+ok('three on a screen with room for them', tail()?.children.length === 3,
+  String(tail()?.children.length));
+
+window.location.hash = '#/';
+await tick();
+ok('a wide window shows the reference blocks again', !el('home-more').hidden);
+ok('and keeps the tabs out of it', el('home-more-toggle').hidden);
 
 // ── 14. finish notifications ──────────────────────────────────────────
 
@@ -980,6 +1181,82 @@ ok('only http and https become links',
   webUrl('https://a.dev') === 'https://a.dev' && webUrl('javascript:alert(1)') === null
   && webUrl('data:text/html,x') === null && webUrl(null) === null);
 ok('a link with a quote in it is refused', webUrl('https://a.dev/"onmouseover="x') === null);
+
+// ── 18b. the fleet model ──────────────────────────────────────────────
+// What a queued job is waiting for is arithmetic, and a wrong answer here
+// is worse than a crash: it would tell you your desktop is idle when it is
+// full, or the other way round.
+
+const { fleet, clampSlots } = await import('../fleet.js');
+
+const job = (id, status, slug, minsAgo) => ({
+  id, status, project_slug: slug, created_at: iso(minsAgo), prompt: 'x',
+});
+const reasons = (f) => f.waiting.map((w) => w.reason).join();
+
+const full = fleet({
+  jobs: [job('a', 'running', 'one', 9), job('b', 'running', 'two', 8), job('c', 'queued', 'three', 7)],
+  maxParallel: 2,
+  hostFresh: true,
+});
+ok('a full fleet has no free slots', full.used === 2 && full.free === 0);
+ok('and the queue is waiting on a slot', reasons(full) === 'slot', reasons(full));
+ok('one pip per slot, all taken', full.pips.join() === 'running,running');
+
+const room = fleet({
+  jobs: [job('a', 'running', 'one', 9), job('c', 'queued', 'three', 7)],
+  maxParallel: 3,
+  hostFresh: true,
+});
+ok('a job with a slot waiting for it is next, not blocked', reasons(room) === 'next');
+ok('free slots are counted', room.free === 2);
+ok('an empty slot has a pip of its own', room.pips.join() === 'running,free,free');
+
+const paused = fleet({
+  jobs: [job('a', 'paused', 'one', 9), job('c', 'queued', 'three', 7)],
+  maxParallel: 1,
+  hostFresh: true,
+});
+ok('a paused agent keeps its slot', paused.used === 1 && paused.free === 0);
+ok('so the next job waits for one', reasons(paused) === 'slot');
+
+const sameProject = fleet({
+  jobs: [job('a', 'running', 'one', 9), job('c', 'queued', 'one', 7)],
+  maxParallel: 4,
+  hostFresh: true,
+});
+ok('a second job on a busy project waits for the project, not a slot',
+  reasons(sameProject) === 'project', reasons(sameProject));
+
+const offline = fleet({ jobs: [job('c', 'queued', 'one', 7)], maxParallel: 3, hostFresh: false });
+ok('with no desktop, a queued job is waiting for the desktop', reasons(offline) === 'host');
+
+const queueOrder = fleet({
+  jobs: [job('a', 'running', 'one', 9), job('b', 'queued', 'two', 8),
+    job('c', 'queued', 'three', 7), job('d', 'queued', 'four', 6)],
+  maxParallel: 2,
+  hostFresh: true,
+});
+ok('the queue is read in the order the runner would claim it',
+  reasons(queueOrder) === 'next,slot,slot', reasons(queueOrder));
+ok('and each job knows how many are in front of it',
+  queueOrder.waiting.map((w) => w.ahead).join() === '0,1,2');
+ok('only the ones a slot would release are counted as blocked',
+  queueOrder.blocked === 2);
+
+const lowered = fleet({
+  jobs: [job('a', 'running', 'one', 9), job('b', 'running', 'two', 8)],
+  maxParallel: 1,
+  hostFresh: true,
+});
+ok('a ceiling lowered under a running fleet is reported, not hidden',
+  lowered.over === 1 && lowered.free === 0);
+
+ok('the ceiling is clamped to something a desktop can do',
+  clampSlots(0) === 1 && clampSlots(99) === 6 && clampSlots('4') === 4);
+ok('and nonsense falls back to the default', clampSlots('many') === 3);
+ok('an empty account has an empty fleet',
+  fleet({}).used === 0 && fleet({}).waiting.length === 0);
 
 // ── 19. markdown unit checks ──────────────────────────────────────────
 
