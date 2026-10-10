@@ -300,6 +300,10 @@ ok('the follow-up keeps the chosen effort', sent?.effort === 'high');
 ok('the follow-up keeps the usage cap', sent?.usage_cap_pct === 90);
 ok('the composer is cleared after sending', el('prompt').value === '');
 ok('a toast confirms the queue', el('toasts').children.length > 0);
+has('and says what it is queued behind, since alpha is already busy',
+  el('toasts').textContent, 'behind the agent already on alpha');
+has('the thread says it too, rather than just "queued"',
+  el('thread').textContent, 'waiting for alpha to finish');
 
 // ── 8. stopping a job ─────────────────────────────────────────────────
 
@@ -707,6 +711,14 @@ for (const id of ['par-1', 'q-gamma']) {
   fake.tables.jobs = fake.tables.jobs.filter((j) => j.id !== id);
   fake.emit('jobs', 'DELETE', null, { id });
 }
+await tick();
+
+// The short form of the same answer, where a row has no space for a clause.
+window.location.hash = '#/';
+await tick();
+has('a queued row on home says what it is waiting for',
+  el('active-list').textContent, 'for a slot');
+window.location.hash = '#/agents';
 await tick();
 
 // ── 11. clearing a chat ───────────────────────────────────────────────

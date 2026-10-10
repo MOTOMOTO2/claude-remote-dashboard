@@ -9,7 +9,6 @@ import {
   openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
 } from './ui.js';
 import { route, initRouter, syncRoute, go, projectHref } from './router.js';
-import { MIN_SLOTS, MAX_SLOTS } from './fleet.js';
 
 if (!store.configured) {
   document.body.innerHTML =
@@ -212,7 +211,7 @@ $('usage-refresh').addEventListener('click', async () => {
 $('slots').addEventListener('change', async (e) => {
   const n = Number(e.target.value);
   if (!Number.isFinite(n)) return;
-  const { error } = await store.saveMaxParallel(Math.min(MAX_SLOTS, Math.max(MIN_SLOTS, n)));
+  const { error } = await store.saveMaxParallel(n);   // the store clamps it
   if (error) {
     toast(`Set to ${n} on this device only — ${error.message}`, { bad: true, ms: 5000 });
   } else {
@@ -314,7 +313,7 @@ $('composer').addEventListener('submit', async (e) => {
   stick = true;
   rememberSettings();
 
-  toast(queuedSentence(), { ms: 3400 });
+  toast(queuedSentence(inProject ? route.slug : null, data?.id), { ms: 3400 });
   if (!inProject && data?.id) go(`#/j/${data.id}`);
   else { scheduleRender(); scrollToEnd(); }
 });
@@ -324,9 +323,15 @@ $('composer').addEventListener('submit', async (e) => {
  * allowed at once, "queued" alone no longer answers it: the useful part is
  * whether a slot is free, and what it is behind if not.
  */
-function queuedSentence() {
+function queuedSentence(slug, id) {
   if (!store.state.hostFresh) return 'Queued — waiting for your desktop';
   const f = store.fleetNow();
+  // The job we just sent is already in the store, so it is not one of the
+  // things it could be waiting for.
+  const others = f.active.filter((j) => j.id !== id);
+  if (slug && others.some((j) => j.project_slug === slug && j.status !== 'queued')) {
+    return `Queued behind the agent already on ${slug}`;
+  }
   if (f.free > 0) return `Queued — starting now (${f.used + 1} of ${f.max} slots)`;
   return `Queued — starts when a slot frees up (${f.used} of ${f.max} busy)`;
 }
