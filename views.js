@@ -42,7 +42,9 @@ function timing(job) {
     // A resume can land tomorrow, so it has to name the day, not just a clock.
     return job.resume_at ? `resumes ${dayClock(job.resume_at)}` : 'waiting';
   }
-  if (job.status === 'queued') return 'waiting for desktop';
+  // With more than one agent allowed, "queued" has several meanings and
+  // only one of them is "your desktop hasn't looked yet".
+  if (job.status === 'queued') return esc(shortWait(job));
   if (job.status === 'running') {
     const from = job.claimed_at ?? job.created_at;
     return `<span data-elapsed="${esc(from)}">${elapsed(from)}</span>`;
@@ -752,12 +754,22 @@ export function slotsSentence() {
   const f = fleetNow();
   const many = `up to ${plural(f.max, 'agent')} at once`;
   const claim = !state.slotsSynced
-    ? `Saved on this device only — the settings row can't be read, so your desktop `
-      + `goes on claiming one job at a time rather than ${many}.`
+    ? `Saved on this device only — the settings row can't be read, so there is `
+      + `no ceiling for your desktop to claim against and it works to its own.`
     : !state.slotsPublished
       ? `Not published yet — tap a number to tell your desktop it may run ${many}.`
       : `Your desktop runs ${many}, one per project.`;
   return `${claim} ${f.used} in flight, ${plural(f.free, 'slot')} free.`;
+}
+
+/** The same answer in the width of a table column. */
+function shortWait(job) {
+  const w = fleetNow().waiting.find((x) => x.job.id === job.id);
+  if (!w) return 'queued';
+  if (w.reason === 'project') return `behind ${w.job.project_slug}`;
+  if (w.reason === 'slot') return w.ahead ? `${w.ahead} ahead` : 'for a slot';
+  if (w.reason === 'host') return 'no desktop';
+  return 'next up';
 }
 
 /** Why one queued job hasn't started, in the words this account can justify. */
@@ -779,7 +791,7 @@ function tailHtml(job) {
 
 /**
  * One agent, as a card: who it is, what it is doing this second, the tail of
- * its log, and the two things you might want — its thread, or its neck.
+ * its log, and the two things you might want from it — its thread, or a stop.
  */
 function agentCard(job) {
   const live = job.status === 'running';
@@ -1054,12 +1066,17 @@ function replyHtml(job) {
   const act = lastActivity(job.id);
   const live = isActive(job);
 
+  const queuedFor = job.status === 'queued'
+    ? fleetNow().waiting.find((w) => w.job.id === job.id) : null;
+
   const trailer = job.status === 'running'
     ? `<span class="msg-clock" data-elapsed="${esc(job.claimed_at ?? job.created_at)}">${
         elapsed(job.claimed_at ?? job.created_at)}</span>`
     : job.status === 'paused' && job.resume_at
       ? `<span class="msg-clock">resumes ${esc(dayClock(job.resume_at))}</span>`
-      : `<span class="msg-clock">${esc(when(job.created_at))}</span>`;
+      : queuedFor
+        ? `<span class="msg-clock">${esc(waitLabel(queuedFor))}</span>`
+        : `<span class="msg-clock">${esc(when(job.created_at))}</span>`;
 
   const paused = job.status === 'paused' ? `
     <p class="note" data-status="paused">Usage limit reached. This picks up
