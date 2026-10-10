@@ -9,6 +9,7 @@ import {
   openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
 } from './ui.js';
 import { route, initRouter, syncRoute, go, projectHref } from './router.js';
+import { MIN_SLOTS, MAX_SLOTS } from './fleet.js';
 
 if (!store.configured) {
   document.body.innerHTML =
@@ -86,7 +87,12 @@ function draw() {
   $('new-view').hidden = v !== 'new';
   $('ideas-view').hidden = v !== 'ideas';
   $('projects-view').hidden = v !== 'projects';
-  $('composer').hidden = v === 'home' || v === 'ideas' || v === 'projects';
+  $('agents-view').hidden = v !== 'agents';
+  // The composer belongs to the two views you type into; everywhere else the
+  // bottom of a phone screen is better spent on the tabs.
+  const typing = v === 'project' || v === 'pending' || v === 'new';
+  $('composer').hidden = !typing;
+  $('tabbar').hidden = typing;
   $('visibility-wrap').hidden = v === 'project';
 
   views.renderTopbar();
@@ -94,10 +100,14 @@ function draw() {
   views.renderUsage();
   views.renderIdeaBadge();
   views.renderProjectBadge();
+  views.renderFleetBadge();
+  views.renderTabs();
   // Only two views show them, and they read the whole account to work it out.
   if (v === 'home' || v === 'new') views.renderSuggestions();
+  if (v === 'new') views.renderNewIntro();
   if (v === 'ideas') views.renderIdeas();
   if (v === 'projects') views.renderProjects();
+  if (v === 'agents') views.renderAgents();
 
   if (v === 'home') views.renderHome();
   if (v === 'project') views.renderChat();
@@ -164,6 +174,7 @@ $('scrim').addEventListener('click', closeDrawer);
 $('new-project').addEventListener('click', () => { go('#/new'); closeDrawer(); focusPrompt(); });
 $('ideas-link').addEventListener('click', closeDrawer);
 $('projects-link').addEventListener('click', closeDrawer);
+$('agents-link').addEventListener('click', closeDrawer);
 $('home-new').addEventListener('click', () => { go('#/new'); focusPrompt(); });
 
 $('project-search').addEventListener('input', (e) => {
@@ -194,6 +205,26 @@ $('usage-refresh').addEventListener('click', async () => {
   btn.disabled = false;
   toast(store.state.usageError ? store.state.usageError : views.usageSentence(),
     { glyph: 'gauge', bad: Boolean(store.state.usageError), ms: 4000 });
+});
+
+// How many agents may run at once. The pips move immediately; the row the
+// runner reads follows, and the toast says which of those happened.
+$('slots').addEventListener('change', async (e) => {
+  const n = Number(e.target.value);
+  if (!Number.isFinite(n)) return;
+  const { error } = await store.saveMaxParallel(Math.min(MAX_SLOTS, Math.max(MIN_SLOTS, n)));
+  if (error) {
+    toast(`Set to ${n} on this device only — ${error.message}`, { bad: true, ms: 5000 });
+  } else {
+    toast(`Up to ${n} agent${n === 1 ? '' : 's'} at once`, { glyph: 'bot' });
+  }
+});
+
+// Home's reference blocks: one tap, on a phone only.
+$('home-more-toggle').addEventListener('click', () => {
+  views.toggleHomeMore();
+  views.renderHome();
+  $('home-more').scrollIntoView?.({ block: 'nearest' });
 });
 
 $('sign-out').addEventListener('click', async () => {
@@ -243,7 +274,9 @@ function updateHint() {
   $('send-hint').textContent = isNarrow() ? '' : 'Enter to send';
 }
 
-window.addEventListener('resize', () => { updateHint(); updateJump(); });
+// Several layouts are decided in JS rather than CSS — home's fold, the meter
+// fold, how many log lines a card shows — so a resize has to redraw.
+window.addEventListener('resize', () => { updateHint(); updateJump(); scheduleRender(); });
 
 $('composer').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -281,16 +314,46 @@ $('composer').addEventListener('submit', async (e) => {
   stick = true;
   rememberSettings();
 
-  toast(store.state.hostFresh ? 'Queued — your desktop has it' : 'Queued — waiting for your desktop');
+  toast(queuedSentence(), { ms: 3400 });
   if (!inProject && data?.id) go(`#/j/${data.id}`);
   else { scheduleRender(); scrollToEnd(); }
 });
 
+/**
+ * What actually happens to the thing you just sent. With several agents
+ * allowed at once, "queued" alone no longer answers it: the useful part is
+ * whether a slot is free, and what it is behind if not.
+ */
+function queuedSentence() {
+  if (!store.state.hostFresh) return 'Queued — waiting for your desktop';
+  const f = store.fleetNow();
+  if (f.free > 0) return `Queued — starting now (${f.used + 1} of ${f.max} slots)`;
+  return `Queued — starts when a slot frees up (${f.used} of ${f.max} busy)`;
+}
+
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all]');
   if (!btn) return;
   const d = btn.dataset;
+
+  if (d.stopAll !== undefined) {
+    const open = store.jobList().filter(store.isActive);
+    const ok = await ask({
+      title: `Stop all ${open.length} agents?`,
+      body: 'Each one stops where it is. Whatever it has already pushed stays.',
+      confirm: `Stop ${open.length}`,
+      danger: true,
+    });
+    if (!ok) return;
+    btn.disabled = true;
+    const results = await Promise.all(open.map((j) => store.cancelJob(j.id)));
+    btn.disabled = false;
+    const failed = results.filter((r) => r.error).length;
+    if (failed) toast(`${failed} of ${open.length} would not stop`, { bad: true });
+    else toast(`Stopping ${open.length} agents…`, { glyph: 'stop' });
+    return;
+  }
 
   if (d.ideaFilter) {
     views.setIdeaFilter(d.ideaFilter);
@@ -384,6 +447,7 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === '/' && !$('composer').hidden) { e.preventDefault(); prompt.focus(); }
   if (e.key === 'n') { e.preventDefault(); go('#/new'); focusPrompt(); }
+  if (e.key === 'a') { e.preventDefault(); go('#/agents'); }
   if (e.key === 'i') { e.preventDefault(); go('#/ideas'); }
   if (e.key === 'p') { e.preventDefault(); go('#/projects'); }
 });
@@ -487,6 +551,7 @@ initTheme();
 initNotify();
 views.renderSuggestions();
 restoreSettings();
+views.renderTabs();
 initRouter(onRoute);
 
 (async () => {

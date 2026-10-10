@@ -1,8 +1,9 @@
-// Hash routing. Six places to be:
+// Hash routing. Seven places to be:
 //   #/            home
 //   #/p/<slug>    one project's chat
 //   #/j/<id>      a brand-new job, until the host names its project
 //   #/new         start a project
+//   #/agents      every agent at once: slots, what's running, what's waiting
 //   #/projects    everything you have, and where each one is live
 //   #/ideas       everything worth building next, read off your own work
 
@@ -15,6 +16,7 @@ export function readHash() {
   if (h.startsWith('j/')) return { view: 'pending', slug: null, jobId: h.slice(2) };
   if (h === 'new') return { view: 'new', slug: null, jobId: null };
   if (h === 'ideas') return { view: 'ideas', slug: null, jobId: null };
+  if (h === 'agents') return { view: 'agents', slug: null, jobId: null };
   if (h === 'projects') return { view: 'projects', slug: null, jobId: null };
   return { view: 'home', slug: null, jobId: null };
 }
