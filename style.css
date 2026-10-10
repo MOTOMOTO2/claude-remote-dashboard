@@ -369,7 +369,8 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 
 .main {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* topbar · scroller · composer · tabs */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-width: 0; min-height: 0;
   position: relative;
 }
@@ -607,14 +608,15 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   }
   #home-view > .hero-card,
   #home-view > #active-block,
-  #home-view > #suggest-block,
-  #home-view > #recent-block { grid-column: 1; }
+  #home-view > #suggest-block { grid-column: 1; }
   #home-view > #usage-block,
   #home-view > #glance-block,
-  #home-view > #activity-block,
-  #home-view > #desktop-block,
+  #home-view > #home-more,
   #home-view > #home-new { grid-column: 2; }
   #home-view > #home-empty { grid-column: 1 / -1; }
+  /* The fleet is a dashboard too: two agent cards want more than a column
+     of prose. */
+  #agents-view { max-width: 58rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -846,6 +848,7 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   font-size: 12px; color: var(--text-2);
   text-decoration: none;
 }
+a.stat-chip:hover { background: var(--surface-3); color: var(--text); }
 .stat-chip[data-status] {
   background: color-mix(in srgb, var(--tone) 13%, transparent);
   color: var(--tone-text);
@@ -1099,11 +1102,11 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
   white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--text-2);
 }
-.log .l-tool      { color: var(--muted); }
-.log .l-assistant { color: var(--text); }
-.log .l-status    { color: var(--active-text); }
-.log .l-error     { color: var(--critical-text); }
-.log .l-result    { color: var(--good-text); }
+:is(.log, .agent-tail) .l-tool      { color: var(--muted); }
+:is(.log, .agent-tail) .l-assistant { color: var(--text); }
+:is(.log, .agent-tail) .l-status    { color: var(--active-text); }
+:is(.log, .agent-tail) .l-error     { color: var(--critical-text); }
+:is(.log, .agent-tail) .l-result    { color: var(--good-text); }
 
 .fold { margin-top: .6rem; }
 .fold > summary {
@@ -1235,19 +1238,26 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 /* The two doors under "New project", side by side. Each carries the size of
    the list behind it, and the one you are behind wears the accent — the same
    treatment as the open project in the list below. */
-.nav-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
-.nav-pair .btn { justify-content: center; gap: .4rem; padding-inline: .5rem; min-width: 0; }
-.nav-pair .count {
+/* Three doors in the width of one button each, so the icon takes the top
+   line and the word the bottom one. */
+.nav-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+.nav-row .btn {
+  flex-direction: column; justify-content: center; gap: .15rem;
+  padding: .5rem .25rem; min-width: 0;
+  font-size: 11.5px; font-weight: 550;
+}
+.nav-row .btn svg { width: 18px; height: 18px; }
+.nav-row .count {
   padding: .02rem .32rem;
   background: var(--surface-2); border-radius: var(--r-full);
   font-size: 10.5px; font-weight: 650; color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.nav-pair .count:empty { display: none; }
-.nav-pair .btn[aria-current="page"] {
+.nav-row .count:empty { display: none; }
+.nav-row .btn[aria-current="page"] {
   background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text);
 }
-.nav-pair .btn[aria-current="page"] .count { background: var(--surface); color: var(--accent-text); }
+.nav-row .btn[aria-current="page"] .count { background: var(--surface); color: var(--accent-text); }
 
 .filter-row {
   display: flex; flex-wrap: wrap; gap: .35rem;
@@ -1524,6 +1534,149 @@ a.proj-live:hover span { text-decoration: underline; }
   font-size: 10.5px; color: var(--muted);
 }
 .chart-base { flex: 1; }
+
+/* ── bottom tabs (phones) ───────────────────────────────────────────── */
+/* A drawer is a detour when all you wanted was the next screen. The tabs
+   take the bottom of the window on narrow screens — but only where the
+   composer isn't already there, which is every view you don't type into. */
+.tabbar {
+  display: flex; align-items: stretch;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  z-index: 9;
+}
+.tab {
+  position: relative; flex: 1 1 0; min-width: 0;
+  display: grid; justify-items: center; align-content: center; gap: .15rem;
+  padding: .45rem .15rem .5rem;
+  color: var(--muted); text-decoration: none;
+  font-size: 10.5px; font-weight: 560; letter-spacing: -.005em;
+  transition: color var(--dur-1) ease;
+}
+.tab svg { width: 21px; height: 21px; stroke-width: 1.8; }
+.tab:active { background: var(--surface-2); }
+.tab[aria-current="page"] { color: var(--accent-text); }
+/* The one action, not a destination: it wears the brand and says so. */
+.tab-new svg {
+  width: 1.95rem; height: 1.95rem; padding: .3rem;
+  background: var(--accent); color: var(--accent-fg);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-1);
+}
+.tab-new[aria-current="page"] svg { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
+/* A neutral count: the number is the information, so no colour encodes it. */
+.tab-count {
+  position: absolute; top: .3rem; left: 50%; margin-left: .3rem;
+  display: grid; place-items: center;
+  min-width: 16px; height: 16px; padding: 0 .22rem;
+  background: var(--surface-3); color: var(--text);
+  border: 1px solid var(--line-strong); border-radius: var(--r-full);
+  font-size: 10px; font-weight: 700; font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── home: the reference half folds away on a phone ─────────────────── */
+#home-more-toggle { margin-bottom: 1.1rem; }
+#home-more-toggle svg { transition: transform var(--dur-2) var(--ease); }
+#home-more-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* ── agents ─────────────────────────────────────────────────────────── */
+/* One card per agent, because several of them running at once is the point:
+   each says what it is doing this second and carries the tail of its own
+   log, so the screen answers "what are they all up to" without a tap. */
+.fleet { display: grid; gap: .6rem; }
+@media (min-width: 760px) { .fleet { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.agent {
+  display: grid; gap: .45rem; align-content: start;
+  padding: .75rem .8rem .8rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+.agent.live { border-color: color-mix(in srgb, var(--tone) 34%, var(--line)); }
+.agent-top { display: flex; align-items: center; gap: .45rem; }
+.agent-name {
+  flex: 1; min-width: 0;
+  font-size: 14px; font-weight: 580; color: var(--text); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent-name:hover { color: var(--accent-text); }
+.agent-clock {
+  flex: none; font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.agent-now {
+  display: flex; align-items: flex-start; gap: .35rem; min-width: 0;
+  margin: 0; font-size: 12.5px; color: var(--text-2);
+}
+.agent-now svg { width: 14px; height: 14px; flex: none; margin-top: .15rem; color: var(--active); }
+.agent-now.quiet svg { color: var(--muted); }
+.agent-now span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-tail {
+  display: grid;
+  padding: .4rem .5rem;
+  background: var(--surface-2); border-radius: var(--r-sm);
+  font: 11.5px/1.55 var(--mono);
+  white-space: pre-wrap; word-break: break-word;
+}
+.agent-foot { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.agent-facts { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; min-width: 0; }
+.agent-actions { display: flex; align-items: center; gap: .35rem; margin-left: auto; }
+.agent-actions .btn { color: var(--text-2); }
+
+/* One pip per slot: filled is an agent, outlined is room for another. The
+   count beside it says the same thing in words. */
+.pips { display: flex; gap: .3rem; margin-top: .85rem; }
+.pips:empty { display: none; }
+.pip {
+  width: 1.3rem; height: .4rem; border-radius: var(--r-full);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.pip.on { background: var(--tone); box-shadow: none; }
+
+.slots-card { display: grid; gap: .55rem; padding: .8rem; }
+.slots-card .segmented { background: var(--surface-2); }
+.slots-card .opt-note { margin: 0; }
+
+/* Why a queued job hasn't started — a dot and the reason, never a colour
+   on its own. */
+.row-why {
+  display: inline-flex; align-items: center; gap: .3rem; flex: none; min-width: 0;
+  font-size: 11px; font-weight: 600; color: var(--tone-text);
+}
+.row-why .dot { width: 6px; height: 6px; background: var(--tone); }
+
+.fleet-foot { display: flex; align-items: center; gap: .5rem; margin-top: .25rem; }
+.fleet-foot .btn { flex: 1 1 auto; }
+
+/* ── phones: the same screens, with less air and fewer edges ────────── */
+@media (max-width: 599px) {
+  .view { padding: .85rem .8rem 1.4rem; }
+  :is(section, div).block { margin-bottom: 1.15rem; }
+  .hero-card { padding: .9rem .95rem 1rem; margin-bottom: 1.15rem; }
+  .hero-figure { font-size: clamp(2.5rem, 11vw, 3.1rem); }
+  .hero-label { font-size: 14px; }
+  .hero-now { margin-top: .65rem; padding-top: .55rem; }
+  .tile { padding: .55rem .6rem .6rem; }
+  .tile-value { font-size: 1.4rem; }
+  .tile-label { font-size: 10.5px; }
+  .intro { padding: .85rem 0 .7rem; }
+  .intro-art { width: 22px; height: 22px; }
+  .intro-h { margin: .35rem 0 .25rem; font-size: 1.2rem; }
+  .intro-p { font-size: 13px; }
+  .segmented span { padding: .3rem .4rem; font-size: 12px; }
+  .usage { gap: .7rem; padding: .75rem; }
+  .fleet { gap: .5rem; }
+  .agent { padding: .65rem .7rem .7rem; }
+  .empty-note.center { margin-top: .9rem; font-size: 12px; }
+  .empty { padding: 1.75rem .5rem; }
+}
 
 /* ── forced colours ─────────────────────────────────────────────────── */
 @media (forced-colors: active) {

@@ -3,6 +3,7 @@
 // whenever a change lands.
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { fleet, clampSlots, DEFAULT_SLOTS } from './fleet.js';
 
 const cfg = window.CONFIG ?? {};
 
@@ -33,6 +34,10 @@ export const state = {
   usageError: null,
   host: null,
   hostFresh: false,
+  /** How many agents may run at once, and whether the runner can see it. */
+  maxParallel: DEFAULT_SLOTS,
+  slotsSynced: false,
+  slotsError: null,
   realtime: 'connecting',
   loading: true,
 };
@@ -49,6 +54,13 @@ export const threadOf = (slug) => jobList()
   .sort(oldest);
 
 export const latestOf = (slug) => threadOf(slug).at(-1);
+
+/** The fleet as it stands: slots, what holds them, what the queue waits on. */
+export const fleetNow = () => fleet({
+  jobs: jobList(),
+  maxParallel: state.maxParallel,
+  hostFresh: state.hostFresh,
+});
 
 export const projectOf = (slug) => state.projects.find((p) => p.name === slug) ?? null;
 
@@ -75,12 +87,13 @@ export const changed = () => emit('change');
  * anything still open, plus the whole thread that is on screen.
  */
 export async function loadAll(openSlug = null) {
-  const [jobRes, projRes, useRes] = await Promise.all([
+  const [jobRes, projRes, useRes, setRes] = await Promise.all([
     sb.from('jobs').select('*').order('created_at', { ascending: false }).limit(200),
     // Every column, not a list: the catalogue ones (description, live link…)
     // only exist once that migration has run, and `*` works either way.
     projectQuery(),
     sb.from('usage_windows').select('*'),
+    settingsQuery(),
   ]);
 
   if (jobRes.error) console.error(jobRes.error);
@@ -89,6 +102,7 @@ export async function loadAll(openSlug = null) {
   for (const j of jobRes.data ?? []) state.jobs.set(j.id, j);
   state.projects = projRes.data ?? [];
   takeUsage(useRes);
+  takeSettings(setRes);
 
   const ids = (jobRes.data ?? [])
     .filter((j) => isActive(j) || j.project_slug === openSlug)
@@ -117,6 +131,67 @@ export async function loadProjects() {
   if (error) return;
   state.projects = data ?? [];
   changed();
+}
+
+// ── how many agents at once ───────────────────────────────────────────
+// The ceiling is a setting the runner obeys, so it has to live in the
+// database, not in this browser. The table is optional: an account whose
+// schema predates it still works, the number is just local to this device
+// until the migration runs — and the Agents screen says which it is.
+
+const SLOTS_KEY = 'cr-slots';
+
+const readLocalSlots = () => {
+  try { return clampSlots(localStorage.getItem(SLOTS_KEY) ?? DEFAULT_SLOTS); }
+  catch { return DEFAULT_SLOTS; }
+};
+
+const writeLocalSlots = (n) => {
+  try { localStorage.setItem(SLOTS_KEY, String(n)); } catch { /* blocked */ }
+};
+
+state.maxParallel = readLocalSlots();
+
+const settingsQuery = () => sb.from('settings').select('*').limit(1);
+
+/**
+ * Accept one read of the ceiling. A missing table is not an error worth
+ * showing — it means the migration hasn't run — but it does change what the
+ * screen may claim, so it is recorded either way.
+ */
+function takeSettings({ data, error }) {
+  if (error) {
+    state.slotsSynced = false;
+    state.slotsError = error.message ?? String(error);
+    return;
+  }
+  state.slotsSynced = true;
+  state.slotsError = null;
+  const row = (data ?? [])[0];
+  if (row?.max_parallel != null) {
+    state.maxParallel = clampSlots(row.max_parallel);
+    writeLocalSlots(state.maxParallel);
+  }
+}
+
+/** Publish the ceiling. Optimistic: the pips move now, the row follows. */
+export async function saveMaxParallel(n) {
+  const value = clampSlots(n);
+  state.maxParallel = value;
+  writeLocalSlots(value);
+  changed();
+
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from('settings').upsert({
+    owner: user?.id,
+    max_parallel: value,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'owner' });
+
+  state.slotsSynced = !error;
+  state.slotsError = error?.message ?? null;
+  changed();
+  return { error };
 }
 
 // ── usage ─────────────────────────────────────────────────────────────

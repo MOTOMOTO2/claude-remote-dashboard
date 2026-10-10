@@ -6,14 +6,14 @@ import {
   firstLine, dayKey, weekday,
 } from './util.js';
 import { md } from './md.js';
-import { icon, setBadge } from './ui.js';
+import { icon, setBadge, isNarrow } from './ui.js';
 import { route, projectHref } from './router.js';
 import { suggest } from './suggest.js';
 import { ideas, profile, themeLabel } from './ideas.js';
 import { catalog, languages, narrow, order, tally, liveHost, webUrl } from './catalog.js';
 import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
-  projectOf, projectGone, eventsOf, lastActivity, resultOf,
+  projectOf, projectGone, eventsOf, lastActivity, resultOf, fleetNow,
 } from './store.js';
 
 // ── bits shared by several views ──────────────────────────────────────
@@ -84,6 +84,7 @@ export function renderTopbar() {
     project: route.slug ?? '',
     pending: 'Starting…',
     new: 'New project',
+    agents: 'Agents',
     ideas: 'Ideas',
     projects: 'Projects',
   };
@@ -103,6 +104,12 @@ export function renderTopbar() {
     ].filter(Boolean).join(' · ');
   } else if (route.view === 'pending') {
     sub = 'waiting for your desktop to name it';
+  } else if (route.view === 'agents') {
+    const f = fleetNow();
+    sub = [
+      `${f.running.length} of ${f.max} running`,
+      f.waiting.length ? `${f.waiting.length} waiting` : '',
+    ].filter(Boolean).join(' · ');
   } else if (route.view === 'ideas') {
     sub = 'read off your own work';
   } else if (route.view === 'projects') {
@@ -191,8 +198,9 @@ export function renderSidebar() {
 
   $('project-list').innerHTML = parts.join('');
 
-  // The two doors under "New project" say which of them you are behind.
-  for (const [id, view] of [['projects-link', 'projects'], ['ideas-link', 'ideas']]) {
+  // The three doors under "New project" say which of them you are behind.
+  for (const [id, view] of [['agents-link', 'agents'], ['projects-link', 'projects'],
+    ['ideas-link', 'ideas']]) {
     if (route.view === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
   }
@@ -251,12 +259,11 @@ function resetHtml(r) {
  * and the track is a lighter step of the same ramp, so the state reads across
  * the whole bar — and the percentage is always written out beside it.
  */
-function usageHtml() {
-  return usageRows().map((r) => {
-    const pct = Math.max(0, Number(r.pct));
-    const { tone, word } = level(pct);
-    const left = Math.max(0, 100 - Math.round(pct));
-    return `
+function meterHtml(r) {
+  const pct = Math.max(0, Number(r.pct));
+  const { tone, word } = level(pct);
+  const left = Math.max(0, 100 - Math.round(pct));
+  return `
       <div class="meter ${tone}">
         <div class="meter-head">
           <span class="meter-name">${esc(WINDOW_LABEL[r.window_type] ?? r.window_type)}</span>
@@ -271,7 +278,26 @@ function usageHtml() {
           ${resetHtml(r)}
         </div>
       </div>`;
-  }).join('');
+}
+
+const usageHtml = () => usageRows().map(meterHtml).join('');
+
+/**
+ * Home's copy. Every window matters, but five meters is most of a phone
+ * screen, so a narrow one leads with the window that will actually stop you
+ * and folds the rest behind their own count. Nothing is dropped.
+ */
+function homeUsageHtml() {
+  const rows = usageRows();
+  if (!rows.length) return '';
+  if (!isNarrow() || rows.length === 1) return rows.map(meterHtml).join('');
+  const lead = tightest();
+  const rest = rows.filter((r) => r !== lead);
+  return meterHtml(lead) + `
+    <details class="fold">
+      <summary>${plural(rest.length, 'more window')}</summary>
+      <div class="usage-rest">${rest.map(meterHtml).join('')}</div>
+    </details>`;
 }
 
 /** One sentence a person can act on, used by the block note and the pill. */
@@ -309,7 +335,10 @@ function freshnessHtml() {
 
 export function renderUsage() {
   const inner = usageHtml();
-  for (const id of ['usage-home', 'usage-new', 'usage-side']) {
+  const home = homeUsageHtml();
+  $('usage-home').innerHTML = home;
+  $('usage-home').hidden = !home;
+  for (const id of ['usage-new', 'usage-side']) {
     const el = $(id);
     el.innerHTML = inner;
     el.hidden = !inner;
@@ -437,6 +466,16 @@ const suggestionHtml = (s) => `
     </span>
     <span class="suggest-go">${icon('arrow')}</span>
   </button>`;
+
+/** The new-project view, where knowing there is room for another matters. */
+export function renderNewIntro() {
+  const f = fleetNow();
+  const room = f.free
+    ? `${plural(f.free, 'slot')} free of ${f.max} — it starts as soon as your desktop sees it.`
+    : `All ${plural(f.max, 'slot')} are busy, so this one queues behind them.`;
+  $('new-intro').textContent = `Describe what to build. Your desktop picks it up, `
+    + `creates the repo, writes the code, and pushes it. ${room}`;
+}
 
 export function renderSuggestions() {
   const all = remember(suggestionList());
@@ -699,19 +738,182 @@ export function renderProjectBadge() {
   $('projects-count').textContent = n ? String(n) : '';
 }
 
+// ── agents (every run at once) ────────────────────────────────────────
+// The fleet screen. Home answers "is anything happening"; this one answers
+// "what are all of them doing, and what is the queue waiting for" — which is
+// the question you get as soon as more than one agent can run.
+
+/** The ceiling in a sentence, used by the hint line and the toast. */
+export function slotsSentence() {
+  const f = fleetNow();
+  const ceiling = `Your desktop runs up to ${plural(f.max, 'agent')} at once`;
+  if (!state.slotsSynced) {
+    return `${ceiling} — but this number is only on this device so far: `
+      + `the settings row isn't readable, so the runner still works one job at a time.`;
+  }
+  return `${ceiling}, one per project. ${f.used} in flight, ${plural(f.free, 'slot')} free.`;
+}
+
+/** Why one queued job hasn't started, in the words this account can justify. */
+function waitLabel({ reason, job, label }) {
+  if (reason === 'project') return `waiting for ${job.project_slug} to finish`;
+  if (reason === 'host') {
+    return state.host ? 'your desktop is offline' : 'no desktop has checked in';
+  }
+  if (reason === 'next') return 'next up — claimed within seconds';
+  return label;
+}
+
+/** The last few log lines, so a card says what it is doing without a tap. */
+function tailHtml(job) {
+  const lines = eventsOf(job.id).slice(isNarrow() ? -2 : -3);
+  if (!lines.length) return '';
+  return `<div class="agent-tail">${lines.map(logLine).join('')}</div>`;
+}
+
+/**
+ * One agent, as a card: who it is, what it is doing this second, the tail of
+ * its log, and the two things you might want — its thread, or its neck.
+ */
+function agentCard(job) {
+  const live = job.status === 'running';
+  const act = live ? lastActivity(job.id) : null;
+  const clock = live
+    ? `<span class="agent-clock" data-elapsed="${esc(job.claimed_at ?? job.created_at)}">${
+        elapsed(job.claimed_at ?? job.created_at)}</span>`
+    : job.resume_at
+      ? `<span class="agent-clock">resumes ${esc(dayClock(job.resume_at))}</span>`
+      : '<span class="agent-clock">waiting</span>';
+
+  const now = act
+    ? `<p class="agent-now">${icon('pulse')}<span>${esc(clip(act.text, 120))}</span></p>`
+    : `<p class="agent-now quiet">${icon('clock')}<span>${esc(firstLine(job.prompt))}</span></p>`;
+
+  const actions = [
+    `<a class="btn tiny ghost" href="${jobHref(job)}">${icon('arrow')}thread</a>`,
+    job.cancel_requested
+      ? '<span class="muted small">stopping…</span>'
+      : `<button class="btn tiny ghost" data-cancel="${esc(job.id)}">${icon('stop')}stop</button>`,
+  ].join('');
+
+  return `
+    <article class="agent${live ? ' live' : ''}" data-status="${esc(job.status)}"
+             data-agent="${esc(job.id)}">
+      <div class="agent-top">
+        <a class="agent-name" href="${jobHref(job)}">${esc(job.project_slug ?? 'naming…')}</a>
+        ${stateTag(job.status, live)}
+        ${clock}
+      </div>
+      ${now}
+      ${job.status === 'paused' ? `<p class="note" data-status="paused">Usage limit reached —
+        it keeps its slot and picks up where it left off${job.resume_at
+          ? ` in ${esc(until(job.resume_at))}` : ''}.</p>` : ''}
+      ${tailHtml(job)}
+      <div class="agent-foot">
+        <span class="agent-facts">${jobFacts(job)}</span>
+        <span class="agent-actions">${actions}</span>
+      </div>
+    </article>`;
+}
+
+const waitRow = (w) => `
+  <a class="row" data-status="queued" href="${jobHref(w.job)}">
+    <span class="row-top">
+      <span class="row-name">${esc(w.job.project_slug ?? 'new project')}</span>
+      <span class="row-why" data-status="${w.reason === 'next' ? 'running' : 'queued'}">
+        <i class="dot"></i>${esc(waitLabel(w))}
+      </span>
+      <span class="row-when">${w.ahead ? `${w.ahead} ahead` : 'first'}</span>
+    </span>
+    <span class="row-sub">${esc(firstLine(w.job.prompt))}</span>
+  </a>`;
+
+/** One pip per slot. A graphic, so the count beside it carries the words. */
+const pipsHtml = (f) => f.pips
+  .map((kind) => `<i class="pip${kind === 'free' ? '' : ` on`}" data-status="${
+    kind === 'free' ? 'queued' : kind}"></i>`)
+  .join('');
+
+export function renderAgents() {
+  const f = fleetNow();
+  const inFlight = [...f.running, ...f.paused];
+
+  $('fleet-value').textContent = String(f.running.length);
+  $('fleet-label').textContent = f.running.length === 1 ? 'agent running' : 'agents running';
+  $('fleet-pips').innerHTML = pipsHtml(f);
+  $('fleet-pips').setAttribute('aria-label',
+    `${f.used} of ${f.max} slots busy${f.paused.length ? `, ${f.paused.length} paused` : ''}`);
+
+  const chip = (status, text) => `<span class="stat-chip"${status ? ` data-status="${status}"` : ''}>${
+    status ? '<i class="dot"></i>' : ''}${text}</span>`;
+  const chips = [chip('', `<b>${f.used}</b> of <b>${f.max}</b> slots busy`)];
+  if (f.paused.length) chips.push(chip('paused', `<b>${f.paused.length}</b> paused for usage`));
+  if (f.blocked) chips.push(chip('queued', `<b>${f.blocked}</b> waiting for a slot`));
+  if (f.over) chips.push(chip('paused', `<b>${f.over}</b> over the ceiling`));
+  if (!state.hostFresh) chips.push(chip('paused', 'desktop offline'));
+  $('fleet-chips').innerHTML = chips.join('');
+
+  for (const el of document.querySelectorAll('#slots input[name="slots"]')) {
+    el.checked = Number(el.value) === f.max;
+  }
+  $('slots-note').textContent = `${f.used} of ${f.max} busy`;
+  $('slots-hint').textContent = slotsSentence();
+
+  $('fleet-count').textContent = inFlight.length ? String(inFlight.length) : '';
+  $('fleet-list').innerHTML = inFlight.map(agentCard).join('');
+  $('fleet-empty').hidden = Boolean(inFlight.length);
+
+  $('waiting-block').hidden = !f.waiting.length;
+  $('waiting-list').innerHTML = f.waiting.map(waitRow).join('');
+  $('waiting-note').textContent = f.waiting.length
+    ? `${plural(f.waiting.length, 'job')} queued` : '';
+
+  const settled = jobList().filter((j) => !isActive(j)).sort(newest).slice(0, 3);
+  $('fleet-done-block').hidden = !settled.length;
+  $('fleet-done').innerHTML = settled.map(jobRow).join('');
+  $('fleet-done-note').textContent = settled.length
+    ? `last ${ago(settled[0].created_at)} ago` : '';
+
+  $('stop-all').hidden = f.active.length < 2;
+}
+
+/** How many agents are in flight, on every door into this view. */
+export function renderFleetBadge() {
+  const n = jobList().filter(isActive).length;
+  $('agents-count').textContent = n ? String(n) : '';
+  const pip = $('tab-agents-count');
+  pip.textContent = n ? String(n) : '';
+  pip.hidden = !n;
+}
+
+/** The bottom tabs on a phone: which section you are in. */
+export function renderTabs() {
+  const doors = [['tab-home', 'home'], ['tab-agents', 'agents'], ['tab-new', 'new'],
+    ['tab-projects', 'projects'], ['tab-ideas', 'ideas']];
+  for (const [id, view] of doors) {
+    if (route.view === view) $(id).setAttribute('aria-current', 'page');
+    else $(id).removeAttribute('aria-current');
+  }
+}
+
 // ── home ──────────────────────────────────────────────────────────────
 
 const pct = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : '—');
 
+/** Running first, then paused, then the queue — urgency, not arrival. */
+const URGENCY = { running: 0, paused: 1, queued: 2 };
+const byUrgency = (a, b) => (URGENCY[a.status] - URGENCY[b.status]) || oldest(a, b);
+
 export function renderHome() {
   const all = jobList();
-  const active = all.filter(isActive).sort(oldest);
+  const active = all.filter(isActive).sort(byUrgency);
   const running = active.filter((j) => j.status === 'running');
   const paused = active.filter((j) => j.status === 'paused');
   const queued = active.filter((j) => j.status === 'queued');
   const finished = all.filter((j) => j.status === 'done');
   const failed = all.filter((j) => j.status === 'error');
 
+  const f = fleetNow();
   const bare = !all.length && !state.projects.length && !state.loading;
   $('home-empty').hidden = !bare;
   // On a brand-new account the empty state is the whole page — a big zero
@@ -738,8 +940,12 @@ export function renderHome() {
   const chip = (status, text) => `
     <span class="stat-chip" data-status="${esc(status)}"><i class="dot"></i>${text}</span>`;
   const chips = [];
+  if (active.length) {
+    chips.push(`<a class="stat-chip" href="#/agents"><b>${f.used}</b> of <b>${f.max}</b> slots busy</a>`);
+  }
   if (paused.length) chips.push(chip('paused', `<b>${paused.length}</b> paused for usage`));
-  if (queued.length) chips.push(chip('queued', `<b>${queued.length}</b> waiting on desktop`));
+  if (f.blocked) chips.push(chip('queued', `<b>${f.blocked}</b> waiting for a slot`));
+  else if (queued.length) chips.push(chip('queued', `<b>${queued.length}</b> waiting on desktop`));
   if (!active.length && !bare) {
     chips.push(`<span class="stat-chip">Nothing in progress</span>`);
   }
@@ -748,11 +954,18 @@ export function renderHome() {
   }
   $('hero-chips').innerHTML = chips.join('');
 
+  // Home leads with the fleet rather than listing it: three rows, then the
+  // door to the screen that holds all of them.
+  const LEAD = 3;
   $('active-block').hidden = bare || !active.length;
   $('active-count').textContent = active.length ? String(active.length) : '';
   $('active-list').innerHTML = state.loading && !active.length
     ? '<div class="skel skel-row"></div>'
-    : active.map(jobRow).join('');
+    : active.slice(0, LEAD).map(jobRow).join('');
+  $('active-note').textContent = active.length > LEAD ? `showing ${LEAD} of ${active.length}` : '';
+  $('active-more').hidden = !active.length;
+  $('active-more-text').textContent = active.length > LEAD
+    ? `All ${active.length} agents` : 'Every agent, and the queue';
 
   const slugs = new Set(all.map((j) => j.project_slug).filter(Boolean));
   const turns = finished.reduce((sum, j) => sum + (Number(j.num_turns) || 0), 0);
@@ -782,7 +995,20 @@ export function renderHome() {
   $('recent-list').innerHTML = recent.map(jobRow).join('');
 
   $('desktop-card').innerHTML = desktopHtml();
+
+  // The reference half of the page — the strip, the history, the desktop —
+  // is the part a phone has no room for, so there it is one tap behind a
+  // toggle. On a wide screen it is the right-hand column and always open.
+  const folded = isNarrow() && !moreOpen;
+  $('home-more').hidden = bare || folded;
+  $('home-more-toggle').hidden = bare || !isNarrow();
+  $('home-more-toggle').setAttribute('aria-expanded', String(!folded));
+  $('home-more-label').textContent = folded ? 'More detail' : 'Less detail';
 }
+
+/** Whether home's reference blocks are open on a narrow screen. */
+let moreOpen = false;
+export const toggleHomeMore = () => { moreOpen = !moreOpen; return moreOpen; };
 
 /** The runner on your PC, spelled out — the pill only has room for a word. */
 function desktopHtml() {
@@ -959,6 +1185,12 @@ export function renderChat() {
 /** Append one log line in place, so a running job's log doesn't flicker. */
 export function appendLive(ev, onRerender) {
   const job = state.jobs.get(ev.job_id);
+  // The fleet cards each carry a tail of their own log, so a line that
+  // belongs to any live agent changes that screen.
+  if (route.view === 'agents') {
+    if (job && isActive(job)) onRerender();
+    return;
+  }
   const onScreen = job && (
     (route.view === 'project' && job.project_slug === route.slug)
     || (route.view === 'pending' && job.id === route.jobId));
