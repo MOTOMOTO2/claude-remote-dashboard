@@ -18,9 +18,16 @@ drives Claude Code lives on the PC.
 ## What it gives you
 
 - **Home** — one hero figure (agents running right now) over the line that says
-  what the lead agent is doing this second, every limit as a meter, what to do
-  next, four counts with their context, the last fortnight of runs, and the
-  state of the desktop itself.
+  what the lead agent is doing this second, the live runs, the limit that will
+  stop you first, what to do next, and four counts with their context. The rest
+  — the fortnight of runs, the finished jobs, the desktop itself — is one tap
+  behind *More detail* on a phone and the right-hand column on a wide screen.
+  See [Less on screen at once](#less-on-screen-at-once).
+- **Several agents at once** — `#/agents` is the fleet: a card per agent with
+  what it is doing this second and the tail of its own log, a ceiling you set
+  (1–6) that your desktop claims against, and a queue where every job says what
+  it is waiting for — a free slot, its own project, or a desktop that isn't
+  there. See [Several agents at once](#several-agents-at-once).
 - **Suggestions from your own work** — "fix what broke in beta", "put gamma on
   GitHub", "write a README for alpha", each shown with the reason it was
   offered. Tap one and it opens that project's chat with the prompt loaded; you
@@ -82,12 +89,95 @@ Both values in `config.js` are safe to publish. The anon key only grants what
 row-level security allows, and every policy is scoped to `auth.uid()`. The
 service-role key must never appear there.
 
+### On the web
+
+`Dockerfile` and `fly.toml` are here, so this deploys to Fly.io as it stands:
+
+```sh
+fly launch --no-deploy     # first time only
+fly deploy
+```
+
+The image is `node:22-alpine` with the files copied in and `tools/serve.mjs`
+as the server — the same dependency-free static server `npm run serve` uses,
+reading `PORT` (8080 in the container) and binding `0.0.0.0`. No build step.
+
+**It needs no secrets.** `config.js` is publishable by design — the anon key
+only grants what row-level security allows — so the app boots with nothing
+set and there is no `fly secrets set` to run. Pointing a deployment at a
+different Supabase project means editing `config.js`, because a static file
+is read by the browser, not by the container.
+
 ### On a phone
 
 Open the URL, then **Add to Home Screen**. Sign in *inside that app* — on iOS a
 home-screen install gets its own storage, separate from Safari, so a session
 created in the browser is not visible to it. If storage is blocked entirely
 (Private tabs do this), the sign-in screen says so rather than silently failing.
+
+## Several agents at once
+
+Queueing more than one job was never the problem; saying how many should
+*run* together was. `#/agents` is that screen, and the number on it is a real
+setting rather than a label:
+
+- **A ceiling, 1 to 6.** It is written to a `settings` row in Supabase, so it
+  follows you between devices — and so the desktop runner can read it and
+  claim that many queued jobs at a time.
+- **A slot is an agent.** One that paused on your usage cap keeps its slot: it
+  resumes where it left off rather than starting over.
+- **One agent per project.** Two agents in one folder would fight over the same
+  working copy, so a second job on a busy project waits for the first.
+
+Which is why nothing here is ever just "queued". A waiting job says *waiting
+for a free slot · 2 ahead*, or *waiting for gamma to finish*, or *your desktop
+is offline*. `fleet.js` is that arithmetic, pure and unit-tested, because
+"waiting for a slot" while the desktop sits idle is worse than a crash.
+
+Each agent gets a card — the live activity line, the last lines of its log,
+the effort and cap it ran with, its thread, and a stop. **Stop all** appears
+once there are two. The hero figure is the running count and the pips under it
+are the slots: filled is an agent, outlined is room for another, and the count
+beside them says the same thing in words.
+
+### The table it wants
+
+```sql
+create table if not exists settings (
+  owner        uuid primary key references auth.users on delete cascade,
+  max_parallel int  not null default 3 check (max_parallel between 1 and 6),
+  updated_at   timestamptz not null default now()
+);
+alter table settings enable row level security;
+create policy "own settings" on settings
+  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+```
+
+Nothing is written until you tap a number, and the hint under the control says
+which of the three states you are in: published, not published yet, or kept on
+this device because the table isn't there. The other half is the runner — claiming up to `max_parallel` jobs, one per project
+folder — and it lives in the agent-host repo. A runner that predates the
+setting ignores it and keeps working one job at a time; you would see the
+queue stack up behind it on this screen, which is the honest picture either
+way.
+
+## Less on screen at once
+
+The phone was carrying eight stacked blocks on home and a drawer as the only
+way between screens. What changed:
+
+- **Bottom tabs on narrow screens** — Home · Agents · New · Projects · Ideas.
+  They own the bottom of the window on every view you don't type into, and
+  step aside for the composer on the two you do, so the two never stack up.
+- **Home leads rather than lists.** Three live rows and a door to the rest.
+  The limits block leads with the window that will actually stop you and folds
+  the others behind their own count. The activity strip, the finished runs and
+  the desktop card sit behind one *More detail* toggle.
+- **Tighter under 600px** — a smaller hero figure, denser tiles, less padding
+  everywhere, two log lines on an agent card instead of three.
+
+Nothing was dropped to make room. A wide screen still opens with all of it, as
+the two-column dashboard it was; everything else is one tap away.
 
 ## Where suggestions come from
 
@@ -195,16 +285,20 @@ npm run contrast    # just the colour claims
 
 Boots the real app in jsdom against a fake Supabase and walks the screens: sign
 in, home, a project thread, sending a follow-up, stopping a run, a job finishing
-over realtime, the new-project flow, the ideas view and its filters, the
-projects view with its search, filters and sort, re-reading
-and failing to read the limits, clearing a chat, the drawer, keyboard shortcuts,
-theming, and the Markdown renderer. It also checks the static invariants a
+over realtime, the new-project flow, the agents view (a second agent arriving
+mid-watch, a live log line landing on its card, the ceiling changed from another
+device and published from this one, a job queued behind its own project, stop
+all), the phone layout (home folding its reference blocks, the limits block
+leading with the tightest window, tabs and composer never sharing the bottom of
+the window), the ideas view and its filters, the projects view with its search,
+filters and sort, re-reading and failing to read the limits, clearing a chat,
+the drawer, keyboard shortcuts, theming, and the Markdown renderer. It also checks the static invariants a
 vanilla app has no compiler for — every `$('id')` exists in the HTML, every icon
 referenced is in the sprite, every module is listed in the service-worker shell,
 and the recurring timer still re-reads usage (it stopped once, and nothing else
 in here would have noticed).
 
-Four things get unit coverage against fixed inputs rather than fixtures,
+Five things get unit coverage against fixed inputs rather than fixtures,
 because a plausible-looking wrong answer is worse there than a crash: the reset
 labels (`dayClock`, `until`, `span` — a weekly limit must never claim it resets
 this afternoon), the suggestion engine (a busy project is left alone, a lost one
@@ -212,7 +306,11 @@ is never offered, the list spans your projects, a live one is not asked to
 deploy), the idea engine (a theme is only claimed when the words are there, a
 combo needs both halves, openers never pad out a list that has real ideas) and
 the project catalogue (a lost project stays out, a deploy shows before the next
-sync, a link that isn't a web address never becomes one).
+sync, a link that isn't a web address never becomes one) and the fleet model (a
+paused agent keeps its slot, a second job on a busy project waits for the
+project rather than a slot, the queue is read in the order the runner would
+claim it, a ceiling lowered under a running fleet is reported rather than
+hidden).
 
 `npm run contrast` is the other half of the net. It parses the tokens out of
 `style.css` and asserts the claims this README makes about them: every ink
@@ -234,8 +332,8 @@ npm run preview -- home dark
 
 Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
-Supabase project at all. Views: `home`, `chat`, `new`, `ideas`, `projects`,
-`auth`, `empty`. Themes: `light`, `dark`, `mobile`. (`preview/` is gitignored.)
+Supabase project at all. Views: `home`, `agents`, `chat`, `new`, `ideas`,
+`projects`, `auth`, `empty`. Themes: `light`, `dark`, `mobile`. (`preview/` is gitignored.)
 
 To screenshot one headlessly:
 
@@ -255,6 +353,7 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `app.js` | Entry point — boot, auth, view switching, composer, shortcuts |
 | `store.js` | Supabase client, the in-memory mirror, realtime, mutations |
 | `views.js` | Rendering. Reads state, writes DOM; never queries |
+| `fleet.js` | Slots, what holds them, and what each queued job waits for. Pure |
 | `suggest.js` | The next step for a project you have, read off its thread. Pure |
 | `ideas.js` | Whole new projects, read off the themes your work shows. Pure |
 | `catalog.js` | The Projects screen's model: every project, its runs, its live link. Pure |
@@ -266,6 +365,8 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `tools/contrast.mjs` | Asserts the colour claims against `style.css` |
 | `tools/icon.mjs` | Redraws `icon.png` from the brand geometry |
 | `tools/preview.mjs` | Freezes one screen to static HTML for a look |
+| `tools/serve.mjs` | The static server — in development and in the container |
+| `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
 
 ## Data it expects
 
@@ -279,6 +380,7 @@ the signed-in user:
 | `usage_windows` | `window_type, pct, resets_at` |
 | `projects` | `name, full_name, is_local, private, pushed_at`, and from the catalogue migration `description, language, topics, stars, is_fork, is_archived, live_url, live_kind` |
 | `hosts` | `name, last_seen` |
+| `settings` | `owner, max_parallel` — optional; see [Several agents at once](#several-agents-at-once) |
 
 A job's `status` is `queued`, `running`, `paused`, `done` or `error`. A desktop
 counts as online if its `last_seen` is under 30 seconds old.
@@ -328,6 +430,25 @@ counts as online if its `last_seen` is under 30 seconds old.
   is silent: the meters simply never move. A ten-second poll costs one small
   query and removes a whole class of "it looks broken" — and the block says
   when it last read, so you can tell a stuck feed from a quiet week.
+- **Three agents at once is the default**, not one and not six. One is what
+  you already had; six is more than a desktop with a single working copy per
+  project tends to enjoy. It is one tap to change and the change is published,
+  so the default only has to be defensible, not right.
+- **The ceiling is advisory, and the screen admits it.** The dashboard cannot
+  make a runner parallel — all it can do is publish the number and describe
+  the queue that follows from it. So the hint under the control says whether
+  the number reached Supabase at all, and the queue reasons are derived from
+  rules the runner is expected to keep (a slot per agent, one agent per
+  project) rather than from anything this page can observe.
+- **Tabs on a phone, a drawer on a desktop.** The drawer still holds the
+  project list, the search and the account controls, but navigating with it
+  meant two taps and a slide for every screen. The tabs cost a strip at the
+  bottom of the views that have no composer — and on the two that do, the
+  composer is the more useful thing to have under your thumb.
+- **Home folds rather than drops.** Every block that moved behind *More
+  detail* is still rendered, still one tap away, and still open by default on
+  a wide screen. Hiding a number because the screen is small is how a
+  dashboard starts lying by omission.
 - **Dates follow the browser's locale** (`toLocaleDateString`), so a reset
   reads "Sat 6:20 p.m." or "Sa 18:20" depending on the phone. The weekday is
   shown for anything two to six days out, a date beyond that.
@@ -342,6 +463,7 @@ counts as online if its `last_seen` is under 30 seconds old.
 | `⌘/Ctrl+Enter` | Send, anywhere |
 | `/` | Focus the composer |
 | `n` | New project |
+| `a` | Agents |
 | `i` | Ideas |
 | `p` | Projects |
 | `Esc` | Close the drawer, the options panel, or unfocus the composer |

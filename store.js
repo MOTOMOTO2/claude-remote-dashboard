@@ -36,7 +36,9 @@ export const state = {
   hostFresh: false,
   /** How many agents may run at once, and whether the runner can see it. */
   maxParallel: DEFAULT_SLOTS,
+  /** Whether the settings table is readable, and whether it has our row. */
   slotsSynced: false,
+  slotsPublished: false,
   slotsError: null,
   realtime: 'connecting',
   loading: true,
@@ -162,12 +164,14 @@ const settingsQuery = () => sb.from('settings').select('*').limit(1);
 function takeSettings({ data, error }) {
   if (error) {
     state.slotsSynced = false;
+    state.slotsPublished = false;
     state.slotsError = error.message ?? String(error);
     return;
   }
   state.slotsSynced = true;
   state.slotsError = null;
   const row = (data ?? [])[0];
+  state.slotsPublished = row?.max_parallel != null;
   if (row?.max_parallel != null) {
     state.maxParallel = clampSlots(row.max_parallel);
     writeLocalSlots(state.maxParallel);
@@ -198,6 +202,7 @@ export async function saveMaxParallel(n) {
   }, { onConflict: 'owner' });
 
   state.slotsSynced = !error;
+  state.slotsPublished = !error;
   state.slotsError = error?.message ?? null;
   changed();
   return { error };

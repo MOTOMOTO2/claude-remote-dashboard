@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 5173);
+// 0.0.0.0 so a container publishes it; localhost still reaches it in dev.
+const HOST = process.env.HOST ?? '0.0.0.0';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -49,6 +51,6 @@ createServer(async (req, res) => {
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
   }
-}).listen(PORT, () => {
+}).listen(PORT, HOST, () => {
   console.log(`claude-remote dashboard → http://localhost:${PORT}`);
 });

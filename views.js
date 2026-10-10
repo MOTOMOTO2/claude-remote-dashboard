@@ -743,15 +743,21 @@ export function renderProjectBadge() {
 // "what are all of them doing, and what is the queue waiting for" — which is
 // the question you get as soon as more than one agent can run.
 
-/** The ceiling in a sentence, used by the hint line and the toast. */
+/**
+ * The ceiling in a sentence. Three cases, and the difference between them
+ * matters: a number nothing can read is not a ceiling, and neither is one
+ * that was never written down.
+ */
 export function slotsSentence() {
   const f = fleetNow();
-  const ceiling = `Your desktop runs up to ${plural(f.max, 'agent')} at once`;
-  if (!state.slotsSynced) {
-    return `${ceiling} — but this number is only on this device so far: `
-      + `the settings row isn't readable, so the runner still works one job at a time.`;
-  }
-  return `${ceiling}, one per project. ${f.used} in flight, ${plural(f.free, 'slot')} free.`;
+  const many = `up to ${plural(f.max, 'agent')} at once`;
+  const claim = !state.slotsSynced
+    ? `Saved on this device only — the settings row can't be read, so your desktop `
+      + `goes on claiming one job at a time rather than ${many}.`
+    : !state.slotsPublished
+      ? `Not published yet — tap a number to tell your desktop it may run ${many}.`
+      : `Your desktop runs ${many}, one per project.`;
+  return `${claim} ${f.used} in flight, ${plural(f.free, 'slot')} free.`;
 }
 
 /** Why one queued job hasn't started, in the words this account can justify. */
