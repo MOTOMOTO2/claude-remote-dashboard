@@ -92,6 +92,11 @@ export function seed() {
       text: '## Two ideas\n\n- a **snake** game\n- a `csv` cleaner' },
     { id: 3, chat_id: 'c2', owner: 'u1', role: 'user', status: 'done', created_at: iso(900),
       text: 'the printer says offline again' },
+    // Both sides of a conversation are drawn, so both are probed.
+    { id: 5, chat_id: 'c1', owner: 'u1', role: 'user', status: 'done', created_at: iso(48),
+      text: 'and a <script>alert(1)</script> one' },
+    { id: 6, chat_id: 'c1', owner: 'u1', role: 'assistant', status: 'done', created_at: iso(47),
+      text: 'Not a chance: <img src=x onerror=alert(1)>' },
     { id: 4, chat_id: 'c2', owner: 'u1', role: 'assistant', status: 'done', created_at: iso(899),
       text: 'Power-cycle it, then re-add it over IP rather than USB.' },
   ];

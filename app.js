@@ -120,9 +120,8 @@ function draw() {
   if (v === 'projects') views.renderProjects();
   if (v === 'agents') views.renderAgents();
   if (v === 'ask') views.renderAsk();
-  if (v === 'home') views.renderAskHome();
 
-  if (v === 'home') views.renderHome();
+  if (v === 'home') { views.renderHome(); views.renderAskHome(); }
   if (v === 'project') views.renderChat();
   if (v === 'pending') {
     const job = store.state.jobs.get(route.jobId);

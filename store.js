@@ -499,11 +499,6 @@ export const messageOf = (id) =>
 export const askChats = () => conversations({ chats: state.chats, messages: state.chatMessages });
 export const askPresence = () => presence(state.assistant);
 export const askPending = () => pendingQueue(state.chatMessages);
-export const conversationOf = (id) => askChats().find((c) => String(c.id) === String(id)) ?? null;
-
-/** Where "Ask" goes with no id: the conversation you were last in. */
-export const newestChatId = () => askChats()[0]?.id ?? null;
-
 const now = () => new Date().toISOString();
 
 /** A fresh conversation. Optimistic: it is on screen before the row lands. */
