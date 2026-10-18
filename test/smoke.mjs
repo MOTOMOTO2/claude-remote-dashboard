@@ -753,9 +753,13 @@ ok('nothing is asking you to set anything up', el('ask-setup').hidden);
 
 // #/ask with no id opens the newest conversation, the way a chat app does.
 has('the newest conversation is open', text('ask-title'), 'what should I build next?');
-ok('its turns are drawn', el('ask-thread').querySelectorAll('.turn').length === 1);
+ok('every turn is drawn', el('ask-thread').querySelectorAll('.turn').length === 2,
+  String(el('ask-thread').querySelectorAll('.turn').length));
 has('your message is there', el('ask-thread').textContent, 'what should I build next?');
 has('the reply renders as Markdown', el('ask-thread').innerHTML, '<strong>snake</strong>');
+ok('and never emits raw html from a reply',
+  !el('ask-thread').innerHTML.includes('<img src=x'));
+has('your own message is escaped too', el('ask-thread').innerHTML, '&lt;script&gt;');
 has('including its heading', el('ask-thread').innerHTML, '<h2>Two ideas</h2>');
 has('the reply is signed by the assistant', el('ask-thread').textContent, 'jarvis');
 ok('a finished reply can be copied', Boolean(el('ask-thread').querySelector('[data-ask-copy]')));
@@ -789,8 +793,9 @@ ok('both are owned by you', written.every((r) => r.owner === 'u1'));
 ok('both land in the open conversation', written.every((r) => r.chat_id === 'c1'));
 ok('the composer is emptied', el('prompt').value === '');
 
-ok('the thread shows the new turn', el('ask-thread').querySelectorAll('.turn').length === 2);
-const pending = el('ask-thread').querySelectorAll('.turn')[1];
+ok('the thread shows the new turn', el('ask-thread').querySelectorAll('.turn').length === 3,
+  String(el('ask-thread').querySelectorAll('.turn').length));
+const pending = el('ask-thread').querySelectorAll('.turn')[2];
 has('the reply says it is about to start', pending.textContent, 'about to start');
 ok('a pending reply is drawn as work in progress',
   pending.querySelector('.msg.agent').dataset.status === 'running'

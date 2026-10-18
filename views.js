@@ -83,13 +83,14 @@ const jobRow = (job) => `
 // ── topbar ────────────────────────────────────────────────────────────
 
 export function renderTopbar() {
+  const who = askPresence();
   const titles = {
     home: 'claude‑remote',
     project: route.slug ?? '',
     pending: 'Starting…',
     new: 'New project',
     agents: 'Agents',
-    ask: askPresence().known ? askPresence().name : 'Assistant',
+    ask: who.known ? who.name : 'Assistant',
     ideas: 'Ideas',
     projects: 'Projects',
   };
@@ -116,7 +117,6 @@ export function renderTopbar() {
       f.waiting.length ? `${f.waiting.length} waiting` : '',
     ].filter(Boolean).join(' · ');
   } else if (route.view === 'ask') {
-    const who = askPresence();
     const threads = askChats().length;
     sub = [
       presenceWord(who),
@@ -1243,6 +1243,7 @@ export function renderAsk() {
 
   $('ask-clear').hidden = !(current && msgs.length);
   if (current) $('ask-clear').dataset.askDelete = current.id;
+  else delete $('ask-clear').dataset.askDelete;
 
   const needsSetup = !state.askReady || !who.known;
   $('ask-setup').hidden = !needsSetup;
