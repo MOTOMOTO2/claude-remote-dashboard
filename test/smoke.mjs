@@ -196,6 +196,8 @@ has('the desktop card names the host', el('desktop-card').textContent, 'desk-pc'
 has('the desktop card says it is online', el('desktop-card').textContent, 'online');
 has('the desktop card reports the live feed', el('desktop-card').textContent, 'Live updates');
 has('the desktop card says what that means', el('desktop-card').textContent, 'starts right away');
+has('and when it last checked in, as a phrase rather than "now ago"',
+  el('desktop-card').textContent, 'just now');
 
 // suggestions, read off the account as it stands
 has('a failed project is the first thing suggested',
@@ -721,6 +723,275 @@ has('a queued row on home says what it is waiting for',
 window.location.hash = '#/agents';
 await tick();
 
+// ── 10e. your own assistant ───────────────────────────────────────────
+// The other half of the merge: the same relay, carrying a conversation
+// instead of a build. What matters here is that a reply never lies about
+// where it is — "typing…" over a PC that is off is the bug this walk exists
+// to catch.
+
+window.location.hash = '#/ask';
+await tick();
+
+ok('the assistant view is shown', !el('ask-view').hidden);
+ok('every other view steps aside there',
+  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden
+  && el('ideas-view').hidden && el('projects-view').hidden && el('agents-view').hidden);
+ok('the composer comes with it', !el('composer').hidden);
+ok('and takes the bottom of the window from the tabs', el('tabbar').hidden);
+ok('job settings are out of the way — a conversation has none',
+  el('opts-toggle').hidden && el('opts').hidden);
+ok('the chip says who answers instead', !el('ask-who').hidden);
+has('and names it', text('ask-who-text'), 'jarvis');
+has('the topbar names your assistant, not the app', text('view-title'), 'jarvis');
+has('and says it is reachable', text('view-sub'), 'online');
+has('the topbar counts the conversations', text('view-sub'), '2 conversations');
+ok('its sidebar door is marked current', el('ask-link').getAttribute('aria-current') === 'page');
+ok('and its tab is too', el('tab-ask').getAttribute('aria-current') === 'page');
+has('the presence pill says it in a word', text('ask-presence-text'), 'online');
+ok('and wears the online class', el('ask-presence').classList.contains('online'));
+ok('nothing is asking you to set anything up', el('ask-setup').hidden);
+
+// #/ask with no id opens the newest conversation, the way a chat app does.
+has('the newest conversation is open', text('ask-title'), 'what should I build next?');
+ok('its turns are drawn', el('ask-thread').querySelectorAll('.turn').length === 1);
+has('your message is there', el('ask-thread').textContent, 'what should I build next?');
+has('the reply renders as Markdown', el('ask-thread').innerHTML, '<strong>snake</strong>');
+has('including its heading', el('ask-thread').innerHTML, '<h2>Two ideas</h2>');
+has('the reply is signed by the assistant', el('ask-thread').textContent, 'jarvis');
+ok('a finished reply can be copied', Boolean(el('ask-thread').querySelector('[data-ask-copy]')));
+ok('and asked again', Boolean(el('ask-thread').querySelector('[data-ask-again]')));
+ok('and handed to an agent', Boolean(el('ask-thread').querySelector('[data-ask-build]')));
+ok('a finished reply has no stop button', !el('ask-thread').querySelector('[data-ask-stop]'));
+ok('the opener is out of the way once there are messages', el('ask-open').hidden);
+
+ok('the other conversation is one tap away', !el('ask-history').hidden);
+has('listed by name', el('ask-history-list').textContent, 'Fixing the printer');
+ok('the open one is not listed twice',
+  el('ask-history-list').querySelectorAll('.row').length === 1);
+ok('and it links to itself', el('ask-history-list').querySelector('.row')
+  .getAttribute('href') === '#/ask/c2');
+
+// ── sending one ───────────────────────────────────────────────────────
+
+const insertsBefore = fake.inserts.length;
+el('prompt').value = 'how do I get this onto my phone?';
+el('composer').dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+await tick();
+
+const written = fake.inserts.slice(insertsBefore);
+ok('a message and the reply it is owed are written together', written.length === 2,
+  `wrote ${written.length}`);
+ok('yours is stored as said', written[0].role === 'user' && written[0].status === 'done');
+has('with the text you typed', written[0].text, 'onto my phone');
+ok('the reply row is queued and empty',
+  written[1].role === 'assistant' && written[1].status === 'queued' && written[1].text === '');
+ok('both are owned by you', written.every((r) => r.owner === 'u1'));
+ok('both land in the open conversation', written.every((r) => r.chat_id === 'c1'));
+ok('the composer is emptied', el('prompt').value === '');
+
+ok('the thread shows the new turn', el('ask-thread').querySelectorAll('.turn').length === 2);
+const pending = el('ask-thread').querySelectorAll('.turn')[1];
+has('the reply says it is about to start', pending.textContent, 'about to start');
+ok('a pending reply is drawn as work in progress',
+  pending.querySelector('.msg.agent').dataset.status === 'running'
+  || pending.querySelector('.msg.agent').dataset.status === 'queued');
+ok('a pending reply can be stopped', Boolean(pending.querySelector('[data-ask-stop]')));
+ok('a reply on the way is counted on the Ask door', text('ask-count') === '1', text('ask-count'));
+ok('and on its tab', text('tab-ask-count') === '1' && !el('tab-ask-count').hidden);
+
+const replyId = written[1].id;
+
+// ── the answer streaming in ───────────────────────────────────────────
+
+const streamed = { ...written[1], status: 'streaming', text: 'Add it to your home' };
+fake.tables.chat_messages = fake.tables.chat_messages
+  .map((m) => (m.id === replyId ? streamed : m));
+fake.emit('chat_messages', 'UPDATE', streamed);
+await tick();
+
+has('the words arrive as they are written', el('ask-thread').textContent, 'Add it to your home');
+has('and the reply says it is typing', el('ask-thread').textContent, 'typing');
+
+const finished = {
+  ...streamed,
+  status: 'done',
+  text: 'Add it to your home screen, then sign in **inside that app**.',
+};
+fake.tables.chat_messages = fake.tables.chat_messages
+  .map((m) => (m.id === replyId ? finished : m));
+fake.emit('chat_messages', 'UPDATE', finished);
+await tick();
+
+has('the finished answer renders', el('ask-thread').innerHTML, '<strong>inside that app</strong>');
+ok('nothing is on the way any more', el('tab-ask-count').hidden);
+ok('a finished reply stops saying typing', !el('ask-thread').textContent.includes('typing'));
+ok('a reply you are watching arrive needs no toast as well',
+  !el('toasts').textContent.includes('jarvis answered'));
+
+// One that lands while you are on another screen is the whole point of
+// relaying through your PC, so that one does say so.
+window.location.hash = '#/';
+await tick();
+const away = {
+  id: 95, chat_id: 'c1', owner: 'u1', role: 'assistant', status: 'queued',
+  text: '', created_at: iso(0),
+};
+fake.tables.chat_messages.push(away);
+fake.emit('chat_messages', 'INSERT', away);
+await tick();
+const landed = { ...away, status: 'done', text: 'answered while you were away' };
+fake.tables.chat_messages = fake.tables.chat_messages.map((m) => (m.id === 95 ? landed : m));
+fake.emit('chat_messages', 'UPDATE', landed);
+await tick();
+has('a reply landing while you are elsewhere is announced',
+  el('toasts').textContent, 'jarvis answered');
+
+window.location.hash = '#/ask';
+await tick();
+
+// ── handing an answer to an agent ─────────────────────────────────────
+
+el('ask-thread').querySelector(`[data-ask-build="${replyId}"]`).click();
+await tick();
+ok('handing an answer over opens the new-project composer',
+  window.location.hash === '#/new', window.location.hash);
+has('with the answer already in the box', el('prompt').value, 'inside that app');
+el('prompt').value = '';
+
+// ── a PC that is switched off ─────────────────────────────────────────
+// The case the whole screen is built around: the message is kept, and it
+// says so, rather than pretending something is typing.
+
+const askStore = await import('../store.js');
+fake.tables.assistants = [
+  { owner: 'u1', name: 'jarvis', model: 'llama3', last_seen: iso(40) },
+];
+const sleeping = {
+  id: 90, chat_id: 'c1', owner: 'u1', role: 'assistant', status: 'queued',
+  text: '', created_at: iso(0),
+};
+fake.tables.chat_messages.push(sleeping);
+fake.emit('chat_messages', 'INSERT', sleeping);
+await askStore.pollAssistant();
+window.location.hash = '#/ask';
+await tick();
+
+has('an offline assistant says when it was last heard', text('ask-presence-text'), 'last seen');
+ok('and the pill stops claiming to be online',
+  el('ask-presence').classList.contains('offline'));
+has('a queued reply waits for the PC, it does not pretend to type',
+  el('ask-thread').textContent, 'waiting for your PC');
+has('and says what that means for you', el('ask-thread').textContent,
+  'answered as soon as it is on again');
+ok('nothing claims to be typing', !el('ask-thread').textContent.includes('typing…'));
+
+// Two queued at once, and the second one says what it is behind.
+const behind = {
+  id: 91, chat_id: 'c2', owner: 'u1', role: 'assistant', status: 'queued',
+  text: '', created_at: iso(-1),
+};
+fake.tables.chat_messages.push(behind);
+fake.emit('chat_messages', 'INSERT', behind);
+fake.tables.assistants = [
+  { owner: 'u1', name: 'jarvis', model: 'llama3', last_seen: new Date().toISOString() },
+];
+await askStore.pollAssistant();
+window.location.hash = '#/ask/c2';
+await tick();
+has('a reply behind another says how many are in front',
+  el('ask-thread').textContent, '1 ahead');
+
+// ── an answer that failed ─────────────────────────────────────────────
+
+const broke = {
+  ...behind, status: 'error', text: '', error: 'ollama exited 1 — model not found',
+};
+fake.tables.chat_messages = fake.tables.chat_messages.map((m) => (m.id === 91 ? broke : m));
+fake.emit('chat_messages', 'UPDATE', broke);
+await tick();
+has('a failure says what the PC said', el('ask-thread').textContent, 'model not found');
+ok('a failed reply is drawn in the failure tone',
+  Boolean(el('ask-thread').querySelector('.msg.agent[data-status="error"]')));
+has('and it can be asked again', el('ask-thread').innerHTML, 'data-ask-again');
+
+// ── a bridge that has never checked in ────────────────────────────────
+
+fake.tables.assistants = [];
+await askStore.pollAssistant();
+await tick();
+ok('with no bridge the screen says what to run', !el('ask-setup').hidden);
+has('naming the command', el('ask-setup').textContent, 'node bridge/bridge.mjs');
+has('and the two ways to point it at your assistant',
+  el('ask-setup').textContent, 'ASSISTANT_CMD');
+has('the pill says there is nothing there yet', text('ask-presence-text'), 'no assistant yet');
+
+// ── a schema that predates the feature ────────────────────────────────
+
+fake.failTable('chats', 'relation "public.chats" does not exist');
+await askStore.loadAsk();
+await tick();
+has('a missing table asks you to run the migration', el('ask-setup').textContent, 'schema.sql');
+has('and prints what the read actually said',
+  el('ask-setup').textContent, 'does not exist');
+ok('the app is still standing', !el('ask-view').hidden);
+
+fake.failTable('chats', null);
+fake.tables.assistants = [
+  { owner: 'u1', name: 'jarvis', model: 'llama3', last_seen: new Date().toISOString() },
+];
+await askStore.loadAsk();
+await tick();
+ok('and recovers when the table turns up', el('ask-setup').hidden);
+
+// ── an opener, when there is nothing said yet ─────────────────────────
+
+const fresh = fake.inserts.length;
+el('ask-new').click();
+await tick();
+ok('a new conversation is written', fake.inserts.length === fresh + 1);
+ok('and opened', window.location.hash.startsWith('#/ask/'), window.location.hash);
+ok('an empty conversation offers openers', !el('ask-open').hidden);
+ok('four of them', el('ask-starters').querySelectorAll('.suggest').length === 4);
+el('ask-starters').querySelector('.suggest').click();
+await tick();
+ok('tapping one fills the box rather than sending it',
+  el('prompt').value.length > 10 && fake.inserts.length === fresh + 1);
+el('prompt').value = '';
+
+// ── home knows about it too ───────────────────────────────────────────
+
+window.location.hash = '#/';
+await tick();
+has('home names the assistant', el('ask-card').textContent, 'jarvis');
+has('and says it is online', el('ask-card').textContent, 'online');
+has('and counts the conversations', el('ask-card').textContent, 'thread');
+has('and explains what happens if the PC sleeps',
+  el('ask-card').textContent, 'Replies come straight back here');
+has('and when it was last heard from', el('ask-card').textContent, 'just now');
+ok('home offers a way straight in', el('ask-quick').querySelectorAll('a, button').length >= 2);
+ok('the card is a door', el('ask-card').getAttribute('href') === '#/ask');
+
+// ── deleting one ──────────────────────────────────────────────────────
+
+window.location.hash = '#/ask/c2';
+await tick();
+el('ask-clear').click();
+await tick();
+if (el('confirm').open) el('confirm-yes').click();
+await tick();
+ok('deleting a conversation deletes the row',
+  fake.deletes.some((d) => d.table === 'chats' && d.where[1] === 'c2'));
+has('and its messages go with it in the view',
+  String(el('ask-history-list').textContent), '');
+ok('and you land back on the assistant', window.location.hash === '#/ask');
+
+// Put the fixtures back for the sections after this one.
+fake.tables.chat_messages = fake.tables.chat_messages
+  .filter((m) => ![90, 91, 95].includes(m.id) && m.chat_id !== 'c2');
+await askStore.loadAsk();
+window.location.hash = '#/agents';
+await tick();
+
 // ── 11. clearing a chat ───────────────────────────────────────────────
 
 window.location.hash = '#/p/beta';
@@ -978,7 +1249,10 @@ await tick();
 // The reset label is the one piece of formatting a wrong answer makes
 // actively misleading, so it gets fixed dates rather than fixtures.
 
-const { dayClock, until, dayDelta, span, weekday } = await import('../util.js');
+const { dayClock, until, dayDelta, span, weekday, since } = await import('../util.js');
+ok('a check-in seconds ago reads as a phrase', since(iso(0)) === 'just now');
+ok('an older one keeps the measurement', since(iso(240)) === '4h ago');
+ok('and nothing is nothing', since(null) === '');
 const noon = new Date('2026-03-12T12:00:00');          // a Thursday
 const at = (d, h, m = 0) => new Date(2026, 2, d, h, m).toISOString();
 
@@ -1321,6 +1595,182 @@ ok('the ceiling is clamped to something a desktop can do',
 ok('and nonsense falls back to the default', clampSlots('many') === 3);
 ok('an empty account has an empty fleet',
   fleet({}).used === 0 && fleet({}).waiting.length === 0);
+
+// ── 18c. the assistant model ──────────────────────────────────────────
+// Fixed inputs, because every one of these answers is a sentence the screen
+// shows you while you wait. "typing…" over a PC that is off, or "about to
+// start" for something fourth in line, is worse than a crash: you would sit
+// there believing it.
+
+const {
+  presence, replyState, conversations, turns: askTurns, titleOf, pendingQueue, isPending,
+} = await import('../assistant.js');
+
+const nowMs = Date.parse('2026-03-12T12:00:00Z');
+const seenAt = (secondsAgo) => new Date(nowMs - secondsAgo * 1000).toISOString();
+
+const never = presence(null, nowMs);
+ok('never having checked in is not the same as being offline',
+  never.known === false && never.online === false);
+ok('a bridge that said hello 5s ago is online',
+  presence({ name: 'jarvis', last_seen: seenAt(5) }, nowMs).online);
+ok('one that said hello 5 minutes ago is not',
+  !presence({ name: 'jarvis', last_seen: seenAt(300) }, nowMs).online);
+ok('and it is still known, so the screen can say when',
+  presence({ name: 'jarvis', last_seen: seenAt(300) }, nowMs).known);
+ok('the name and model come through',
+  presence({ name: 'jarvis', model: 'llama3', last_seen: seenAt(1) }, nowMs).model === 'llama3');
+ok('a bridge with no name still has one to print',
+  presence({ name: '', last_seen: seenAt(1) }, nowMs).name === 'your assistant');
+
+const queued = { role: 'assistant', status: 'queued', text: '' };
+ok('a queued reply with the PC off waits for the PC',
+  replyState({ message: queued, online: false, known: true }).kind === 'offline');
+ok('and never claims to be typing',
+  !replyState({ message: queued, online: false, known: true }).label.includes('typing'));
+ok('a queued reply with the PC on is about to start',
+  replyState({ message: queued, online: true }).kind === 'next');
+has('one with others in front says how many',
+  replyState({ message: queued, online: true, ahead: 2 }).label, '2 ahead');
+ok('a streaming reply is typing even if the heartbeat is stale',
+  replyState({ message: { ...queued, status: 'streaming' }, online: false }).kind === 'typing');
+ok('a stop beats everything else',
+  replyState({ message: { ...queued, status: 'streaming', cancel_requested: true } }).kind
+    === 'stopping');
+ok('a done reply is done and not live',
+  replyState({ message: { ...queued, status: 'done', text: 'hi' } }).kind === 'done');
+ok('an errored reply carries its reason',
+  replyState({ message: { ...queued, status: 'error', error: 'boom' } }).note === 'boom');
+ok('with no bridge at all, a reply says so rather than guessing',
+  replyState({ message: queued, online: false, known: false }).kind === 'never');
+ok('only a queued or streaming reply is pending',
+  isPending(queued) && isPending({ ...queued, status: 'streaming' })
+  && !isPending({ ...queued, status: 'done' })
+  && !isPending({ role: 'user', status: 'done' }));
+
+const msgs = [
+  { id: 1, chat_id: 'a', role: 'user', text: 'first thing I ever asked', status: 'done', created_at: iso(90) },
+  { id: 2, chat_id: 'a', role: 'assistant', text: 'answered', status: 'done', created_at: iso(89) },
+  { id: 3, chat_id: 'b', role: 'user', text: 'later', status: 'done', created_at: iso(5) },
+  { id: 4, chat_id: 'b', role: 'assistant', text: '', status: 'queued', created_at: iso(4) },
+];
+const convos = conversations({
+  chats: [
+    { id: 'a', created_at: iso(90), updated_at: iso(89) },
+    { id: 'b', created_at: iso(5), updated_at: iso(4) },
+    { id: 'c', created_at: iso(200), updated_at: iso(200), title: 'Named by hand' },
+  ],
+  messages: msgs,
+});
+ok('conversations come back newest first', convos.map((c) => c.id).join() === 'b,a,c',
+  convos.map((c) => c.id).join());
+ok('an untitled conversation is named by how it opened',
+  convos.find((c) => c.id === 'a').title === 'first thing I ever asked');
+ok('a title you set wins', convos.find((c) => c.id === 'c').title === 'Named by hand');
+ok('an empty one still shows up, with a name',
+  convos.find((c) => c.id === 'c').messages.length === 0
+  && convos.find((c) => c.id === 'c').asked === 0);
+ok('a pending reply is counted against its own conversation',
+  convos.find((c) => c.id === 'b').pending === 1
+  && convos.find((c) => c.id === 'a').pending === 0);
+ok('a long opening line is clipped, not left to break the row',
+  titleOf({}, [{ role: 'user', text: 'x'.repeat(120), created_at: iso(1) }]).length <= 48);
+ok('nothing said yet has a name anyway',
+  titleOf({}, []) === 'New conversation');
+
+const paired = askTurns(msgs.filter((m) => m.chat_id === 'a'));
+ok('a message and its reply are one turn', paired.length === 1
+  && paired[0].you.id === 1 && paired[0].reply.id === 2);
+const volunteered = askTurns([
+  { id: 1, role: 'assistant', text: 'unprompted', created_at: iso(3) },
+  { id: 2, role: 'user', text: 'oh', created_at: iso(2) },
+  { id: 3, role: 'assistant', text: 'yes', created_at: iso(1) },
+]);
+ok('a reply with nothing in front of it still gets a turn',
+  volunteered.length === 2 && volunteered[0].you === null);
+
+ok('the queue is read in the order the bridge would claim it',
+  pendingQueue(msgs).map((m) => m.id).join() === '4');
+ok('an empty account has an empty queue', pendingQueue([]).length === 0);
+ok('and no presence to report', presence(undefined).known === false);
+
+// ── 19b. the bridge's adapters ────────────────────────────────────────
+// The one part of the PC half that has to guess: what shape a reply arrives
+// in. Every guess lives in bridge/reply.mjs, so every guess is checked here.
+
+const {
+  bodyText, bodyError, chunkText, sniff, makeStream, oneShot, transcript,
+} = await import('../bridge/reply.mjs');
+
+ok('OpenAI streaming deltas are understood',
+  bodyText({ choices: [{ delta: { content: 'hi' } }] }) === 'hi');
+ok('OpenAI whole messages are too',
+  bodyText({ choices: [{ message: { content: 'hi' } }] }) === 'hi');
+ok('Anthropic content blocks are joined',
+  bodyText({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }) === 'ab');
+ok('Anthropic stream deltas are understood', bodyText({ delta: { text: 'c' } }) === 'c');
+ok('Ollama chat is understood', bodyText({ message: { content: 'ok' } }) === 'ok');
+ok('Ollama generate is understood', bodyText({ response: 'ok' }) === 'ok');
+ok('a hand-written endpoint can just say reply', bodyText({ reply: 'ok' }) === 'ok');
+ok('or text, or answer',
+  bodyText({ text: 'a' }) === 'a' && bodyText({ answer: 'b' }) === 'b');
+ok('a shape nobody recognises yields nothing rather than noise',
+  bodyText({ mystery: 1 }) === '');
+ok('an error in the body is found', bodyError({ error: 'no model' }) === 'no model');
+ok('including a nested one', bodyError({ error: { message: 'no model' } }) === 'no model');
+ok('and a body with no error says so', bodyError({ ok: 1 }) === '');
+
+ok('a server-sent event stream is recognised', sniff('data: {"x":1}') === 'sse');
+ok('so is newline-delimited JSON', sniff('{"x":1}\n') === 'lines');
+ok('and plain prose', sniff('Hello there') === 'prose');
+ok('nothing yet is not a guess', sniff('   ') === null);
+
+ok('an SSE data line gives up its text',
+  chunkText('data: {"choices":[{"delta":{"content":"hey"}}]}', 'sse') === 'hey');
+ok('SSE protocol lines are not mistaken for prose',
+  chunkText('event: message', 'sse') === '' && chunkText('', 'sse') === '');
+ok('the end-of-stream marker adds nothing',
+  chunkText('data: [DONE]', 'sse') === '');
+ok('a JSON line that does not parse is kept as prose, never dropped',
+  chunkText('{half a line', 'lines') === '{half a line\n');
+ok('prose is passed through exactly', chunkText('  two  spaces ') === '  two  spaces ');
+
+let errored = '';
+try { chunkText('data: {"error":"model not found"}', 'sse'); }
+catch (e) { errored = e.message; }
+ok('an error arriving mid-stream is thrown, not printed as a reply',
+  errored === 'model not found');
+
+const prosePieces = [];
+const proseStream = makeStream((t) => prosePieces.push(t));
+proseStream.push('Line one\nLine ');
+proseStream.push('two\n');
+proseStream.end();
+ok('prose keeps its own newlines', prosePieces.join('') === 'Line one\nLine two\n',
+  JSON.stringify(prosePieces.join('')));
+
+const ssePieces = [];
+const sseStream = makeStream((t) => ssePieces.push(t));
+sseStream.push('data: {"response":"Hel');
+sseStream.push('lo"}\n\ndata: {"response":" there"}\n');
+sseStream.end();
+ok('a stream split mid-token is reassembled', ssePieces.join('') === 'Hello there',
+  ssePieces.join('|'));
+ok('and the mode is decided once, from the first thing said', sseStream.mode === 'sse');
+
+const lumpy = [];
+const lineStream = makeStream((t) => lumpy.push(t));
+lineStream.push('{"response":"a"}\n{"response":"b"}');
+lineStream.end();
+ok('an unterminated last line is still delivered', lumpy.join('') === 'ab', lumpy.join('|'));
+
+ok('a whole JSON body at once is unwrapped', oneShot('{"reply":"done"}') === 'done');
+ok('a whole plain body is left alone', oneShot('just words') === 'just words');
+ok('and an empty one is empty', oneShot('') === '' && oneShot(null) === '');
+
+has('a transcript labels both sides',
+  transcript([{ role: 'user', text: 'q' }, { role: 'assistant', text: 'a' }]),
+  'You: q\n\nAssistant: a');
 
 // ── 19. markdown unit checks ──────────────────────────────────────────
 

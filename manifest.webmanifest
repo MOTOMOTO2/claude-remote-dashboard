@@ -16,6 +16,7 @@
     { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
   ],
   "shortcuts": [
+    { "name": "Ask your assistant", "url": "#/ask" },
     { "name": "New project", "url": "#/new" },
     { "name": "Agents", "url": "#/agents" }
   ]

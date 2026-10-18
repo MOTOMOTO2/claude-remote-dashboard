@@ -34,6 +34,16 @@ export function ago(iso) {
   return `${Math.floor(s / (7 * DAY))}w`;
 }
 
+/**
+ * The same span as `ago`, written as a phrase rather than a measurement:
+ * "just now" · "4m ago" · "3d ago". A card that says *when* something last
+ * happened wants the sentence; a row in a list wants the measurement.
+ */
+export const since = (iso) => {
+  const t = ago(iso);
+  return !t ? '' : t === 'now' ? 'just now' : `${t} ago`;
+};
+
 /** A running stopwatch: 42s · 3m07s · 1h12m. */
 export function elapsed(from) {
   const s = Math.max(0, Math.floor((Date.now() - new Date(from).getTime()) / 1000));

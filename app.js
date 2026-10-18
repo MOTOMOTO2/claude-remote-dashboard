@@ -8,7 +8,8 @@ import {
   initTheme, initNotify, notify, startTicker, toast, ask, copy,
   openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
 } from './ui.js';
-import { route, initRouter, syncRoute, go, projectHref } from './router.js';
+import { route, initRouter, syncRoute, go, projectHref, askHref } from './router.js';
+import { STARTERS } from './assistant.js';
 
 if (!store.configured) {
   document.body.innerHTML =
@@ -87,12 +88,22 @@ function draw() {
   $('ideas-view').hidden = v !== 'ideas';
   $('projects-view').hidden = v !== 'projects';
   $('agents-view').hidden = v !== 'agents';
+  $('ask-view').hidden = v !== 'ask';
   // The composer belongs to the two views you type into; everywhere else the
   // bottom of a phone screen is better spent on the tabs.
-  const typing = v === 'project' || v === 'pending' || v === 'new';
+  const typing = v === 'project' || v === 'pending' || v === 'new' || v === 'ask';
   $('composer').hidden = !typing;
   $('tabbar').hidden = typing;
   $('visibility-wrap').hidden = v === 'project';
+  // Effort, a usage cap and a repo are a *job's* settings; a conversation has
+  // none of them, so that panel steps aside and the chip says who answers.
+  const chatting = v === 'ask';
+  $('opts-toggle').hidden = chatting;
+  $('ask-who').hidden = !chatting;
+  if (chatting) {
+    $('opts').hidden = true;
+    $('opts-toggle').setAttribute('aria-expanded', 'false');
+  }
 
   views.renderTopbar();
   views.renderSidebar();
@@ -100,6 +111,7 @@ function draw() {
   views.renderIdeaBadge();
   views.renderProjectBadge();
   views.renderFleetBadge();
+  views.renderAskBadge();
   views.renderTabs();
   // Only two views show them, and they read the whole account to work it out.
   if (v === 'home' || v === 'new') views.renderSuggestions();
@@ -107,6 +119,8 @@ function draw() {
   if (v === 'ideas') views.renderIdeas();
   if (v === 'projects') views.renderProjects();
   if (v === 'agents') views.renderAgents();
+  if (v === 'ask') views.renderAsk();
+  if (v === 'home') views.renderAskHome();
 
   if (v === 'home') views.renderHome();
   if (v === 'project') views.renderChat();
@@ -119,11 +133,13 @@ function draw() {
   $('prompt').placeholder = v === 'project'
     ? `Message ${route.slug}…`
     : v === 'pending' ? 'Waiting for your desktop…'
+    : v === 'ask' ? `Ask ${store.askPresence().name}…`
     : 'Describe what to build…';
   $('send').disabled = v === 'pending';
 
   updateSummary();
   updateHint();
+  tunePoll();
   if (stick && inThread()) scrollToEnd('auto');
   updateJump();
 }
@@ -131,7 +147,8 @@ function draw() {
 // ── scrolling ─────────────────────────────────────────────────────────
 
 let stick = true;
-const inThread = () => route.view === 'project' || route.view === 'pending';
+const inThread = () => route.view === 'project' || route.view === 'pending'
+  || route.view === 'ask';
 const scroller = () => $('scroller');
 const nearBottom = () => {
   const el = scroller();
@@ -162,7 +179,7 @@ function onRoute() {
   scroller().scrollTop = 0;
   if (route.view === 'project') store.loadThreadEvents(route.slug);
   render();
-  if (route.view === 'project' || route.view === 'pending') scrollToEnd('auto');
+  if (inThread()) scrollToEnd('auto');
 }
 
 // ── wiring ────────────────────────────────────────────────────────────
@@ -174,6 +191,7 @@ $('new-project').addEventListener('click', () => { go('#/new'); closeDrawer(); f
 $('ideas-link').addEventListener('click', closeDrawer);
 $('projects-link').addEventListener('click', closeDrawer);
 $('agents-link').addEventListener('click', closeDrawer);
+$('ask-link').addEventListener('click', closeDrawer);
 $('home-new').addEventListener('click', () => { go('#/new'); focusPrompt(); });
 
 $('project-search').addEventListener('input', (e) => {
@@ -191,6 +209,22 @@ $('projects-sort').addEventListener('change', (e) => {
 });
 
 $('host-badge').addEventListener('click', () => toast(views.hostExplainer(), { glyph: 'auto', ms: 4000 }));
+
+// Both say the same sentence: whether your assistant is awake on the PC, and
+// what happens to a message if it isn't.
+for (const id of ['ask-presence', 'ask-who']) {
+  $(id).addEventListener('click', () => {
+    toast(views.askExplainer(), { glyph: 'brain', ms: 5000 });
+    store.pollAssistant();
+  });
+}
+
+$('ask-new').addEventListener('click', async () => {
+  const { data, error } = await store.startConversation();
+  if (error) { toast(error.message, { bad: true }); return; }
+  go(askHref(data?.id));
+  focusPrompt();
+});
 // Both usage affordances re-read before they answer, so tapping one is also
 // the way to force a refresh.
 $('usage-pill').addEventListener('click', () => {
@@ -282,6 +316,10 @@ $('composer').addEventListener('submit', async (e) => {
   const text = prompt.value.trim();
   if (!text || route.view === 'pending') return;
 
+  // Two things can be in the box: a job for an agent, or a message for your
+  // own assistant. Same composer, same send button, different relay.
+  if (route.view === 'ask') { await sendToAssistant(text); return; }
+
   const note = $('composer-note');
   const btn = $('send');
   btn.disabled = true;
@@ -319,6 +357,48 @@ $('composer').addEventListener('submit', async (e) => {
 });
 
 /**
+ * Say something to your own assistant. The message and the empty reply it is
+ * owed are written together, so the thread shows an answer on its way even
+ * with the PC off — and the toast says which of those two it is.
+ */
+async function sendToAssistant(text) {
+  const note = $('composer-note');
+  const btn = $('send');
+  btn.disabled = true;
+  note.hidden = true;
+
+  const current = views.currentConversation();
+  const { error, chatId } = await store.askAssistant({ chatId: current?.id ?? null, text });
+
+  if (error) {
+    note.textContent = error.message;
+    note.hidden = false;
+    toast('Could not send that', { bad: true });
+    btn.disabled = false;
+    return;
+  }
+
+  prompt.value = '';
+  autoGrow();
+  btn.disabled = false;
+  stick = true;
+  toast(askSentence(), { glyph: 'brain', ms: 3400 });
+
+  if (chatId && route.chatId !== chatId) go(askHref(chatId));
+  else { scheduleRender(); scrollToEnd(); }
+}
+
+/** Where that message actually is now — not just "sent". */
+function askSentence() {
+  const who = store.askPresence();
+  if (!who.known) return 'Saved — no assistant has checked in yet';
+  if (!who.online) return 'Saved — answered as soon as your PC is on';
+  const ahead = store.askPending().length - 1;
+  if (ahead > 0) return `Sent — ${who.name} has ${ahead} ahead of it`;
+  return `Sent — ${who.name} is on it`;
+}
+
+/**
  * What actually happens to the thing you just sent. With several agents
  * allowed at once, "queued" alone no longer answers it: the useful part is
  * whether a slot is free, and what it is behind if not.
@@ -338,9 +418,67 @@ function queuedSentence(slug, id) {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete]');
   if (!btn) return;
   const d = btn.dataset;
+
+  // An opener is the same deal as a suggestion: it fills the box and you
+  // still press send.
+  if (d.askStarter !== undefined) {
+    const starter = STARTERS[Number(d.askStarter)];
+    if (!starter) return;
+    if (route.view !== 'ask') go('#/ask');
+    fillPrompt(starter.text);
+    return;
+  }
+
+  if (d.askStop) {
+    btn.disabled = true;
+    const { error } = await store.stopReply(d.askStop);
+    if (error) { toast(error.message, { bad: true }); btn.disabled = false; }
+    else toast('Stopping…', { glyph: 'stop' });
+    return;
+  }
+
+  if (d.askCopy) {
+    copy(store.messageOf(d.askCopy)?.text ?? '', 'Reply copied');
+    return;
+  }
+
+  if (d.askAgain) {
+    btn.disabled = true;
+    const { error } = await store.askAgain(d.askAgain);
+    if (error) { toast(error.message, { bad: true }); btn.disabled = false; return; }
+    toast(askSentence(), { glyph: 'brain' });
+    return;
+  }
+
+  // The two halves meeting: an answer worth building becomes a job, aimed at
+  // a new project, with the text already in the composer.
+  if (d.askBuild) {
+    const text = store.messageOf(d.askBuild)?.text ?? '';
+    if (!text) return;
+    go('#/new');
+    fillPrompt(text);
+    toast('Handed to an agent — edit and send', { glyph: 'bot', ms: 3600 });
+    return;
+  }
+
+  if (d.askDelete) {
+    const ok = await ask({
+      title: 'Delete this conversation?',
+      body: 'The messages go for good. Your assistant on the PC keeps whatever memory it has of its own.',
+      confirm: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    btn.disabled = true;
+    const { error } = await store.deleteConversation(d.askDelete);
+    if (error) { toast(error.message, { bad: true }); btn.disabled = false; return; }
+    toast('Conversation deleted');
+    go('#/ask');
+    return;
+  }
 
   if (d.stopAll !== undefined) {
     const open = store.jobList().filter(store.isActive);
@@ -453,6 +591,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/' && !$('composer').hidden) { e.preventDefault(); prompt.focus(); }
   if (e.key === 'n') { e.preventDefault(); go('#/new'); focusPrompt(); }
   if (e.key === 'a') { e.preventDefault(); go('#/agents'); }
+  if (e.key === 'k') { e.preventDefault(); go('#/ask'); focusPrompt(); }
   if (e.key === 'i') { e.preventDefault(); go('#/ideas'); }
   if (e.key === 'p') { e.preventDefault(); go('#/projects'); }
 });
@@ -488,6 +627,18 @@ $('auth-form').addEventListener('submit', async (e) => {
 // ── store → views ─────────────────────────────────────────────────────
 
 store.on('change', scheduleRender);
+store.on('reply', (msg) => {
+  // A reply can land long after you put the phone down — the whole point of
+  // relaying through your PC — so it says so wherever you are.
+  const who = store.askPresence();
+  if (msg.status === 'error') {
+    toast(`${who.name} could not answer`, { bad: true, ms: 4000 });
+    notify(`${who.name} could not answer`, msg.error ?? '');
+    return;
+  }
+  if (route.view !== 'ask') toast(`${who.name} answered`, { glyph: 'brain' });
+  notify(`${who.name} answered`, firstLine(msg.text));
+});
 store.on('event', (ev) => views.appendLive(ev, scheduleRender));
 store.on('finish', (job) => {
   // The host deploys and re-syncs before it marks a job done, so the new repo
@@ -510,6 +661,20 @@ store.on('finish', (job) => {
 
 let hostTimer = null;
 let tickTimer = null;
+let replyTimer = null;
+
+/**
+ * A reply streams in as repeated updates to one row, and realtime only
+ * carries those if `chat_messages` is in the Supabase publication. So while
+ * anything is actually pending, re-read the newest messages on a short timer
+ * — and stop the moment nothing is. Without it a reply can sit at "typing…"
+ * for ever on a project whose publication was never touched.
+ */
+function tunePoll() {
+  const pending = store.state.askReady && store.askPending().length > 0;
+  if (pending && !replyTimer) replyTimer = setInterval(() => store.pollReplies(), 1500);
+  if (!pending && replyTimer) { clearInterval(replyTimer); replyTimer = null; }
+}
 
 /**
  * If storage is blocked, Supabase writes the session and it silently vanishes,
@@ -536,6 +701,8 @@ async function applySession(session) {
   store.unsubscribe();
   clearInterval(hostTimer);
   clearInterval(tickTimer);
+  clearInterval(replyTimer);
+  replyTimer = null;
 
   if (!signedIn) {
     closeDrawer();
@@ -545,7 +712,7 @@ async function applySession(session) {
 
   syncRoute();
   render();
-  await store.loadAll(route.slug);
+  await Promise.all([store.loadAll(route.slug), store.loadAsk()]);
   store.subscribe();
   store.pollHost();
   // Usage and the agent ceiling ride the same timer as the host. Realtime on
@@ -555,9 +722,10 @@ async function applySession(session) {
     store.pollHost();
     store.pollUsage();
     store.pollSettings();
+    store.pollAssistant();
   }, 10_000);
   tickTimer = startTicker();
-  if (route.view === 'project' || route.view === 'pending') scrollToEnd('auto');
+  if (inThread()) scrollToEnd('auto');
 }
 
 initTheme();
@@ -577,11 +745,16 @@ initRouter(onRoute);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && !$('app').hidden) {
     store.loadAll(route.slug);
+    store.loadAsk();
     store.pollHost();
   }
 });
 
-window.addEventListener('online', () => { setOffline(false); store.loadAll(route.slug); });
+window.addEventListener('online', () => {
+  setOffline(false);
+  store.loadAll(route.slug);
+  store.loadAsk();
+});
 window.addEventListener('offline', () => setOffline(true));
 setOffline(!navigator.onLine);
 

@@ -4,6 +4,7 @@
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { fleet, clampSlots, DEFAULT_SLOTS } from './fleet.js';
+import { conversations, presence, isPending, pendingQueue } from './assistant.js';
 
 const cfg = window.CONFIG ?? {};
 
@@ -40,6 +41,13 @@ export const state = {
   slotsSynced: false,
   slotsPublished: false,
   slotsError: null,
+  /** Your own assistant: its conversations, their messages, and the bridge. */
+  chats: [],
+  chatMessages: [],
+  assistant: null,
+  /** Whether the chat tables are there at all, and why not if they aren't. */
+  askReady: false,
+  askError: null,
   realtime: 'connecting',
   loading: true,
 };
@@ -76,7 +84,7 @@ export const projectGone = (slug) =>
 
 // ── change notification ───────────────────────────────────────────────
 
-const listeners = { change: [], event: [], finish: [] };
+const listeners = { change: [], event: [], finish: [], reply: [] };
 
 export const on = (name, fn) => { listeners[name].push(fn); };
 const emit = (name, arg) => { for (const fn of listeners[name]) fn(arg); };
@@ -322,6 +330,36 @@ export function subscribe() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'usage_windows' },
         () => { pollUsage(); })
       .subscribe(),
+
+    // Your assistant's half. A reply streams in as repeated UPDATEs to one
+    // row, so this channel is what makes it read like typing — and
+    // `pollReplies` on a short timer is the net under it, because an UPDATE
+    // only reaches us if `chat_messages` is in the publication.
+    sb.channel('chat-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' },
+        ({ new: row, old, eventType }) => {
+          if (eventType === 'DELETE' || (!row?.id && old?.id)) {
+            state.chatMessages = state.chatMessages.filter((m) => m.id !== old?.id);
+            changed();
+            return;
+          }
+          if (row?.id) { takeMessage(row); changed(); }
+        })
+      .subscribe(),
+
+    sb.channel('chats-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' },
+        ({ new: row, old, eventType }) => {
+          if (eventType === 'DELETE' || (!row?.id && old?.id)) {
+            state.chats = state.chats.filter((c) => c.id !== old?.id);
+          } else if (row?.id) {
+            const i = state.chats.findIndex((c) => c.id === row.id);
+            if (i < 0) state.chats = [row, ...state.chats];
+            else state.chats[i] = row;
+          }
+          changed();
+        })
+      .subscribe(),
   );
 }
 
@@ -370,6 +408,178 @@ export async function deleteChat(slug) {
   const res = await sb.from('jobs').delete().eq('project_slug', slug);
   if (!res.error) {
     for (const [id, j] of state.jobs) if (j.project_slug === slug) state.jobs.delete(id);
+    changed();
+  }
+  return res;
+}
+
+// ── your own assistant ────────────────────────────────────────────────
+// The same relay, a different payload. A message goes into `chat_messages`
+// with an empty reply row behind it; the bridge on your PC claims that row,
+// streams the answer into it, and marks it done. Which is why the thread can
+// be honest while you wait: the row exists whether or not the PC is awake.
+//
+// All three tables are optional. An account whose schema predates them keeps
+// working — the Assistant screen says the migration hasn't run instead of
+// throwing — exactly like the agent ceiling.
+
+const MESSAGE_LIMIT = 600;
+
+const chatsQuery = () => sb.from('chats').select('*')
+  .order('updated_at', { ascending: false }).limit(60);
+
+const messagesQuery = (n = MESSAGE_LIMIT) => sb.from('chat_messages').select('*')
+  .order('id', { ascending: false }).limit(n);
+
+const bridgeQuery = () => sb.from('assistants').select('*')
+  .order('last_seen', { ascending: false }).limit(1);
+
+const byId = (a, b) => (Date.parse(a.created_at ?? '') || 0) - (Date.parse(b.created_at ?? '') || 0)
+  || String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+
+/**
+ * Accept one message row, from a load, a realtime event or a poll. A reply
+ * that has just stopped being pending is announced, so a finished answer can
+ * raise a toast and a notification from wherever you were.
+ */
+function takeMessage(row) {
+  if (!row?.id) return;
+  const i = state.chatMessages.findIndex((m) => String(m.id) === String(row.id));
+  const before = i < 0 ? null : state.chatMessages[i];
+  if (i < 0) state.chatMessages.push(row);
+  else state.chatMessages[i] = { ...before, ...row };
+  state.chatMessages.sort(byId);
+  if (before && isPending(before) && !isPending(row)) emit('reply', row);
+}
+
+/** Read the assistant half. Three small tables, all of them optional. */
+export async function loadAsk() {
+  const [chatRes, msgRes, bridgeRes] = await Promise.all([
+    chatsQuery(), messagesQuery(), bridgeQuery(),
+  ]);
+
+  if (chatRes.error || msgRes.error) {
+    state.askReady = false;
+    state.askError = (chatRes.error ?? msgRes.error).message ?? 'unavailable';
+  } else {
+    state.askReady = true;
+    state.askError = null;
+    state.chats = chatRes.data ?? [];
+    state.chatMessages = [...(msgRes.data ?? [])].sort(byId);
+  }
+  // The bridge table standing alone is not worth an error: no row simply
+  // means nothing has ever checked in, which the screen already says.
+  state.assistant = bridgeRes.error ? null : (bridgeRes.data?.[0] ?? null);
+  changed();
+}
+
+/** Is the bridge there? One row, so it rides the same ten-second timer. */
+export async function pollAssistant() {
+  const { data, error } = await bridgeQuery();
+  if (!error) state.assistant = data?.[0] ?? null;
+  changed();
+}
+
+/**
+ * Re-read the newest messages. Only runs while a reply is actually pending —
+ * the app starts and stops this one itself — because it exists for the case
+ * where realtime UPDATEs never arrive and a reply would otherwise sit at
+ * "typing…" forever.
+ */
+export async function pollReplies() {
+  const { data, error } = await messagesQuery(60);
+  if (error) return;
+  for (const row of data ?? []) takeMessage(row);
+  changed();
+}
+
+export const messageOf = (id) =>
+  state.chatMessages.find((m) => String(m.id) === String(id)) ?? null;
+
+export const askChats = () => conversations({ chats: state.chats, messages: state.chatMessages });
+export const askPresence = () => presence(state.assistant);
+export const askPending = () => pendingQueue(state.chatMessages);
+export const conversationOf = (id) => askChats().find((c) => String(c.id) === String(id)) ?? null;
+
+/** Where "Ask" goes with no id: the conversation you were last in. */
+export const newestChatId = () => askChats()[0]?.id ?? null;
+
+const now = () => new Date().toISOString();
+
+/** A fresh conversation. Optimistic: it is on screen before the row lands. */
+export async function startConversation(title = null) {
+  const { data: { user } } = await sb.auth.getUser();
+  const res = await sb.from('chats')
+    .insert({ owner: user?.id, title, created_at: now(), updated_at: now() })
+    .select('*').single();
+  if (res.data?.id) {
+    state.chats = [res.data, ...state.chats.filter((c) => c.id !== res.data.id)];
+    changed();
+  }
+  return res;
+}
+
+/** Keep a conversation's place in the list without waiting for the write. */
+function touchConversation(id) {
+  const at = now();
+  const chat = state.chats.find((c) => c.id === id);
+  if (chat) chat.updated_at = at;
+  sb.from('chats').update({ updated_at: at }).eq('id', id).then(() => {}, () => {});
+}
+
+/**
+ * Say something. Writes your message and the empty reply it is owed, so the
+ * thread shows an answer on its way even with the PC off — and so the bridge
+ * has one row to claim rather than inventing one.
+ */
+export async function askAssistant({ chatId, text }) {
+  const { data: { user } } = await sb.auth.getUser();
+  const owner = user?.id;
+
+  let id = chatId;
+  if (!id) {
+    const made = await startConversation();
+    if (made.error) return { error: made.error, chatId: null };
+    id = made.data.id;
+  }
+
+  const mine = await sb.from('chat_messages')
+    .insert({ chat_id: id, owner, role: 'user', text, status: 'done', created_at: now() })
+    .select('*').single();
+  if (mine.error) return { error: mine.error, chatId: id };
+
+  const reply = await sb.from('chat_messages')
+    .insert({ chat_id: id, owner, role: 'assistant', text: '', status: 'queued', created_at: now() })
+    .select('*').single();
+
+  takeMessage(mine.data);
+  if (reply.data) takeMessage(reply.data);
+  touchConversation(id);
+  changed();
+  return { error: reply.error ?? null, chatId: id, reply: reply.data ?? null };
+}
+
+/** Stop a reply mid-sentence. The bridge watches this flag as it streams. */
+export const stopReply = (id) =>
+  sb.from('chat_messages').update({ cancel_requested: true }).eq('id', id);
+
+/** Ask the same question again, into the same row — the chat's "run again". */
+export async function askAgain(id) {
+  const patch = { status: 'queued', text: '', error: null, cancel_requested: false };
+  const res = await sb.from('chat_messages').update(patch).eq('id', id);
+  if (!res.error) {
+    const row = state.chatMessages.find((m) => String(m.id) === String(id));
+    if (row) Object.assign(row, patch);
+    changed();
+  }
+  return res;
+}
+
+export async function deleteConversation(id) {
+  const res = await sb.from('chats').delete().eq('id', id);
+  if (!res.error) {
+    state.chats = state.chats.filter((c) => c.id !== id);
+    state.chatMessages = state.chatMessages.filter((m) => m.chat_id !== id);
     changed();
   }
   return res;

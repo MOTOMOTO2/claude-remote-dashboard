@@ -5,16 +5,16 @@
 //   node --import ./test/register.mjs tools/preview.mjs home dark
 //
 // Writes preview/<view>-<theme>.html.
-// Views: home · agents · chat · new · ideas · projects · auth · empty.
+// Views: home · agents · ask · chat · new · ideas · projects · auth · empty.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fake } from '../test/fake-supabase.mjs';
-import { seed, makeWindow, tick, root } from '../test/harness.mjs';
+import { seed, makeWindow, tick, root, iso } from '../test/harness.mjs';
 
 const [view = 'home', theme = 'light'] = process.argv.slice(2);
 const HASH = {
-  home: '#/', agents: '#/agents', chat: '#/p/alpha', new: '#/new', ideas: '#/ideas',
-  projects: '#/projects',
+  home: '#/', agents: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
+  ideas: '#/ideas', projects: '#/projects',
   auth: '#/', empty: '#/',
 };
 if (!(view in HASH)) {
@@ -25,6 +25,16 @@ if (!(view in HASH)) {
 seed();
 if (view === 'empty') {
   for (const table of Object.keys(fake.tables)) fake.tables[table] = [];
+}
+// A reply arriving is the state worth looking at on the assistant screen.
+if (view === 'ask') {
+  fake.tables.chat_messages.push(
+    { id: 9, chat_id: 'c1', owner: 'u1', role: 'user', status: 'done', created_at: iso(2),
+      text: 'how do I keep you reachable when I am out?' },
+    { id: 10, chat_id: 'c1', owner: 'u1', role: 'assistant', status: 'streaming',
+      created_at: iso(2),
+      text: 'Leave the bridge running on this PC. It talks outward to Supabase, so' },
+  );
 }
 const { dom, window } = makeWindow({ width: theme === 'mobile' ? 420 : 1200, dark: theme === 'dark' });
 window.localStorage.setItem('cr-theme', theme === 'dark' ? 'dark' : 'light');

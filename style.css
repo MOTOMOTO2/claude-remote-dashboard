@@ -1240,7 +1240,7 @@ a.stat-chip:hover { background: var(--surface-3); color: var(--text); }
    treatment as the open project in the list below. */
 /* Three doors in the width of one button each, so the icon takes the top
    line and the word the bottom one. */
-.nav-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+.nav-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; }
 .nav-row .btn {
   flex-direction: column; justify-content: center; gap: .15rem;
   padding: .5rem .25rem; min-width: 0;
@@ -1557,6 +1557,11 @@ a.proj-live:hover span { text-decoration: underline; }
   transition: color var(--dur-1) ease;
 }
 .tab svg { width: 21px; height: 21px; stroke-width: 1.8; }
+.tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 389px) {
+  .tab { font-size: 9.5px; }
+  .tab svg { width: 19px; height: 19px; }
+}
 .tab:active { background: var(--surface-2); }
 .tab[aria-current="page"] { color: var(--accent-text); }
 /* The one action, not a destination: it wears the brand and says so. */
@@ -1677,6 +1682,33 @@ a.proj-live:hover span { text-decoration: underline; }
   .empty-note.center { margin-top: .9rem; font-size: 12px; }
   .empty { padding: 1.75rem .5rem; }
 }
+
+/* ── your own assistant ────────────────────────────── */
+/* A conversation is the project thread with the job parts taken out, so it
+   inherits .msg, .md and .note wholesale. Two things are new: a reply that is
+   still being typed, and a card on home that is also a door. */
+.ask-dots { display: flex; gap: .3rem; margin: .55rem 0 0; }
+.ask-dots i {
+  width: 6px; height: 6px; flex: none;
+  border-radius: var(--r-full);
+  background: var(--active);
+  animation: blink 1.25s ease-in-out infinite;
+}
+.ask-dots i:nth-child(2) { animation-delay: .18s; }
+.ask-dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes blink { 0%, 100% { opacity: .22; } 50% { opacity: 1; } }
+
+#ask-setup { margin-bottom: 1.1rem; }
+#ask-history { margin-bottom: 1.1rem; }
+#ask-starters { margin-top: .35rem; }
+#ask-thread:empty { display: none; }
+
+a#ask-card { display: block; color: inherit; text-decoration: none; }
+a#ask-card:hover { border-color: var(--accent-line); }
+
+/* The chip in the composer is a readout, not a toggle, so it never lights up
+   the way the options chip does. */
+#ask-who { cursor: default; }
 
 /* ── forced colours ─────────────────────────────────────────────────── */
 @media (forced-colors: active) {
