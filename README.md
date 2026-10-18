@@ -445,7 +445,7 @@ project, it just has less to say about each.
 ## Tests
 
 ```sh
-npm test            # contrast guard, then the app in jsdom
+npm test            # contrast guard, the app in jsdom, then the bridge
 npm run contrast    # just the colour claims
 ```
 
@@ -496,6 +496,17 @@ theme toggle) agree token for token, and nothing in the brand or status ramp
 sits in the orange band. It is not decoration: it caught a status dot at 2.96:1
 and chart bars at 1.6:1 when this palette went in.
 
+`test/bridge.mjs` is the third part, and it runs the real thing: it starts a
+server that answers the way PostgREST does, runs `bridge/bridge.mjs --once`
+against it as an actual child process, and reads what it left behind. Covered
+that way: the claim is filtered on the status, so two bridges can never take
+the same message; the answer is written several times over rather than once
+at the end, which is what makes it read like typing; a stop lands as *done*
+with "(stopped)" rather than as a failure; an assistant that exits non-zero
+leaves the reply in `error` with its own stderr in it; and with nothing
+queued the bridge still checks in before it stops. Deleting the status filter
+from the claim fails that suite, which is the point of writing it.
+
 The Supabase CDN import is swapped for a local fake by a Node module loader
 (`test/loader.mjs`), so the app runs in the test exactly as the browser loads
 it — there is no test-only seam in the app code.
@@ -539,6 +550,7 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `md.js` | A small Markdown subset, escape-first so output is safe |
 | `util.js` | Escaping, time and text helpers |
 | `sw.js` | Service worker: caches the app shell, never Supabase traffic |
+| `test/bridge.mjs` | Runs the real bridge against a stand-in for PostgREST |
 | `tools/contrast.mjs` | Asserts the colour claims against `style.css` |
 | `tools/icon.mjs` | Redraws `icon.png` from the brand geometry |
 | `tools/preview.mjs` | Freezes one screen to static HTML for a look |
