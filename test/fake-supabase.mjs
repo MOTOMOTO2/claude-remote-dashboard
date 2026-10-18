@@ -7,6 +7,7 @@ export const fake = {
   session: null,
   tables: {
     jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
+    chats: [], chat_messages: [], assistants: [],
   },
   /** table -> error, so a read can be made to fail the way a real one does. */
   failures: {},
@@ -20,6 +21,7 @@ export const fake = {
   reset() {
     this.tables = {
       jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
+    chats: [], chat_messages: [], assistants: [],
     };
     this.failures = {};
     this.inserts = [];

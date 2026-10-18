@@ -1,7 +1,7 @@
 // Chrome that isn't the data: theme, drawer, toasts, confirm dialog, the
 // one-second ticker that keeps relative times honest.
 
-import { $, esc, ago, elapsed, until } from './util.js';
+import { $, esc, ago, since, elapsed, until } from './util.js';
 
 // ── icons ─────────────────────────────────────────────────────────────
 /** Reference into the sprite in index.html. */
@@ -171,6 +171,9 @@ export function startTicker() {
     }
     for (const el of document.querySelectorAll('[data-until]')) {
       el.textContent = until(el.dataset.until);
+    }
+    for (const el of document.querySelectorAll('[data-since]')) {
+      el.textContent = since(el.dataset.since);
     }
   };
   beat();

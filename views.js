@@ -2,18 +2,20 @@
 // no fetches. Called whenever the store says something changed.
 
 import {
-  $, esc, ago, elapsed, dayClock, until, when, stamp, plural, clip,
+  $, esc, ago, since, elapsed, dayClock, until, when, stamp, plural, clip,
   firstLine, dayKey, weekday, signedOut, SIGNED_OUT_FIX,
 } from './util.js';
 import { md } from './md.js';
 import { icon, setBadge, isNarrow } from './ui.js';
-import { route, projectHref } from './router.js';
+import { route, projectHref, askHref } from './router.js';
 import { suggest } from './suggest.js';
 import { ideas, profile, themeLabel } from './ideas.js';
 import { catalog, languages, narrow, order, tally, liveHost, webUrl } from './catalog.js';
+import { replyState, turns as askTurns, STARTERS, isPending } from './assistant.js';
 import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
   projectOf, projectGone, eventsOf, lastActivity, resultOf, fleetNow,
+  askChats, askPresence, askPending,
 } from './store.js';
 
 // ── bits shared by several views ──────────────────────────────────────
@@ -87,6 +89,7 @@ export function renderTopbar() {
     pending: 'Starting…',
     new: 'New project',
     agents: 'Agents',
+    ask: askPresence().known ? askPresence().name : 'Assistant',
     ideas: 'Ideas',
     projects: 'Projects',
   };
@@ -111,6 +114,13 @@ export function renderTopbar() {
     sub = [
       `${f.running.length} of ${f.max} running`,
       f.waiting.length ? `${f.waiting.length} waiting` : '',
+    ].filter(Boolean).join(' · ');
+  } else if (route.view === 'ask') {
+    const who = askPresence();
+    const threads = askChats().length;
+    sub = [
+      presenceWord(who),
+      threads ? plural(threads, 'conversation') : '',
     ].filter(Boolean).join(' · ');
   } else if (route.view === 'ideas') {
     sub = 'read off your own work';
@@ -201,8 +211,8 @@ export function renderSidebar() {
   $('project-list').innerHTML = parts.join('');
 
   // The three doors under "New project" say which of them you are behind.
-  for (const [id, view] of [['agents-link', 'agents'], ['projects-link', 'projects'],
-    ['ideas-link', 'ideas']]) {
+  for (const [id, view] of [['ask-link', 'ask'], ['agents-link', 'agents'],
+    ['projects-link', 'projects'], ['ideas-link', 'ideas']]) {
     if (route.view === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
   }
@@ -906,8 +916,8 @@ export function renderFleetBadge() {
 
 /** The bottom tabs on a phone: which section you are in. */
 export function renderTabs() {
-  const doors = [['tab-home', 'home'], ['tab-agents', 'agents'], ['tab-new', 'new'],
-    ['tab-projects', 'projects'], ['tab-ideas', 'ideas']];
+  const doors = [['tab-home', 'home'], ['tab-ask', 'ask'], ['tab-agents', 'agents'],
+    ['tab-new', 'new'], ['tab-projects', 'projects'], ['tab-ideas', 'ideas']];
   for (const [id, view] of doors) {
     if (route.view === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
@@ -1048,7 +1058,7 @@ function desktopHtml() {
            <i class="dot${hostFresh ? ' live' : ''}"></i>${hostFresh ? 'online' : 'offline'}</span>`
       : `<span class="state" data-status="error"><i class="dot"></i>never seen</span>`],
     ['Last checked in', host
-      ? `<span data-ago="${esc(host.last_seen)}">${ago(host.last_seen)}</span> ago`
+      ? `<span data-since="${esc(host.last_seen)}">${since(host.last_seen)}</span>`
       : '—'],
     ['Live updates', `<span class="state" data-status="${realtime === 'live' ? 'done' : 'paused'}">
        <i class="dot"></i>${esc(feed)}</span>`],
@@ -1061,6 +1071,267 @@ function desktopHtml() {
   return rows.map(([k, v]) => `
     <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
     .join('') + `<p class="info-note">${esc(note)}</p>`;
+}
+
+// ── your own assistant ────────────────────────────────────────────────
+// The second thing this app relays. A coding agent answers with a repo; your
+// assistant answers with a sentence — but the path is identical, so the
+// screen keeps the same manners: a reply always says what it is waiting for,
+// and "typing…" is never printed over a PC that is switched off.
+
+/** Reply states, drawn in the ramp the rest of the app already uses. */
+const REPLY_STATUS = {
+  typing: 'running',    // work in progress is blue, not a warning
+  stopping: 'running',
+  next: 'queued',
+  queued: 'queued',
+  offline: 'paused',    // waiting on something outside the app is amber
+  never: 'paused',
+  failed: 'error',
+  done: 'done',
+};
+
+/** The conversation on screen: the one in the URL, else the newest. */
+export function currentConversation() {
+  const all = askChats();
+  if (route.chatId) return all.find((c) => String(c.id) === String(route.chatId)) ?? null;
+  return all[0] ?? null;
+}
+
+/** The word on the pill. Four states, because "offline" hides two of them. */
+function presenceWord(who) {
+  if (!state.askReady) return 'not set up';
+  if (!who.known) return 'no assistant yet';
+  if (who.online) return 'online';
+  return `last seen ${ago(who.lastSeen)} ago`;
+}
+
+/** The same thing in a sentence — the toast, and the card on home. */
+export function askExplainer() {
+  const who = askPresence();
+  if (!state.askReady) {
+    return 'The conversation tables are not in your Supabase project yet. Run '
+      + 'bridge/schema.sql, then start the bridge on your PC.';
+  }
+  if (!who.known) {
+    return 'No assistant has ever checked in. Run the bridge on your PC and it shows '
+      + 'up here — then anything you send is answered while the PC is on.';
+  }
+  const model = who.model ? ` (${who.model})` : '';
+  if (who.online) {
+    return `${who.name}${model} is listening on your PC. Replies come straight back here.`;
+  }
+  return `${who.name}${model} last checked in ${ago(who.lastSeen)} ago. What you send waits `
+    + 'in the queue and is answered as soon as your PC is on again.';
+}
+
+/** What to do about it, when there is something to do. */
+function setupHtml() {
+  if (!state.askReady) {
+    return `
+      <div class="info-row"><span class="info-k">Tables</span>
+        <span class="info-v"><span class="state" data-status="error"><i class="dot"></i>missing</span></span></div>
+      <div class="info-row"><span class="info-k">What to run</span>
+        <span class="info-v"><code>bridge/schema.sql</code></span></div>
+      <p class="info-note">Paste that file into the Supabase SQL editor once. It creates the
+        three tables this screen reads — conversations, messages, and the bridge's
+        heartbeat — each one locked to your own account.${
+        state.askError ? ` The read said: ${esc(state.askError)}` : ''}</p>`;
+  }
+  return `
+    <div class="info-row"><span class="info-k">Bridge</span>
+      <span class="info-v"><span class="state" data-status="paused"><i class="dot"></i>never checked in</span></span></div>
+    <div class="info-row"><span class="info-k">What to run</span>
+      <span class="info-v"><code>node bridge/bridge.mjs</code></span></div>
+    <p class="info-note">On the PC, point <code>ASSISTANT_CMD</code> or
+      <code>ASSISTANT_URL</code> at the assistant you built and leave the bridge running.
+      It claims whatever you send from here, streams the answer back, and says hello
+      every ten seconds so this screen can tell you it is awake.</p>`;
+}
+
+const starterHtml = (st, i) => `
+  <button type="button" class="suggest" data-ask-starter="${i}" data-kind="starter">
+    <span class="suggest-icon">${icon(st.icon)}</span>
+    <span class="suggest-text">
+      <span class="suggest-title">${esc(st.text)}</span>
+      <span class="suggest-why"><span class="why-text">drops into the box — you still press send</span></span>
+    </span>
+    <span class="suggest-go">${icon('arrow')}</span>
+  </button>`;
+
+/** One reply: what it says, or what it is still waiting for. */
+function askReplyHtml(message, { who, queue }) {
+  const spot = queue.findIndex((m) => String(m.id) === String(message.id));
+  const st = replyState({
+    message,
+    online: who.online,
+    known: who.known,
+    ahead: Math.max(0, spot),
+  });
+  const status = REPLY_STATUS[st.kind] ?? 'queued';
+  const live = isPending(message);
+
+  const body = message.text ? `<div class="msg-body md">${md(message.text)}</div>` : '';
+  const dots = st.live && !message.text
+    ? '<p class="ask-dots" role="status" aria-label="typing"><i></i><i></i><i></i></p>' : '';
+  const note = st.note
+    ? `<p class="note" data-status="${esc(status)}">${esc(st.note)}</p>` : '';
+  const failed = st.kind === 'failed' && message.error
+    ? `<p class="note bad" data-status="error">${esc(message.error)}</p>` : '';
+
+  const actions = [
+    live && !message.cancel_requested
+      ? `<button class="btn tiny ghost" data-ask-stop="${esc(message.id)}">${icon('stop')}stop</button>`
+      : '',
+    !live && message.text
+      ? `<button class="btn tiny ghost" data-ask-copy="${esc(message.id)}">${icon('copy')}copy</button>`
+      : '',
+    !live
+      ? `<button class="btn tiny ghost" data-ask-again="${esc(message.id)}">${icon('retry')}ask again</button>`
+      : '',
+    // The merge, in one button: an answer worth building becomes a job.
+    !live && message.text
+      ? `<button class="btn tiny ghost" data-ask-build="${esc(message.id)}">${icon('bot')}hand to an agent</button>`
+      : '',
+  ].filter(Boolean).join('');
+
+  return `
+    <div class="msg agent${st.live ? ' live' : ''}" data-status="${esc(status)}"
+         data-reply="${esc(message.id)}">
+      <div class="msg-head">
+        <span class="state" data-status="${esc(status)}">
+          <i class="dot${st.live ? ' live' : ''}"></i>${esc(who.known ? who.name : 'assistant')}
+        </span>
+        <span class="msg-clock">${esc(st.label || when(message.created_at))}</span>
+      </div>
+      ${note}
+      ${body}
+      ${dots}
+      ${failed}
+      <div class="msg-actions">${actions}</div>
+    </div>`;
+}
+
+export function renderAsk() {
+  const who = askPresence();
+  const all = askChats();
+  const current = currentConversation();
+  const msgs = current?.messages ?? [];
+  const queue = askPending();
+
+  $('ask-title').textContent = current ? current.title : 'Assistant';
+  $('ask-presence-text').textContent = presenceWord(who);
+  $('ask-presence').classList.toggle('online', who.online);
+  $('ask-presence').classList.toggle('offline', !who.online);
+
+  const asked = msgs.filter((m) => m.role === 'user').length;
+  const answered = msgs.filter((m) => m.role === 'assistant' && m.status === 'done').length;
+  const stats = [
+    asked ? plural(asked, 'message') : '',
+    answered ? `${answered} answered` : '',
+    queue.length ? `${queue.length} on the way` : '',
+    who.model ?? '',
+  ].filter(Boolean);
+  $('ask-stats').innerHTML = msgs.length
+    ? `${stats.map((b) => esc(b)).join(' · ')} · last `
+      + `<span data-ago="${esc(msgs.at(-1).created_at)}">${ago(msgs.at(-1).created_at)}</span> ago`
+    : '';
+
+  $('ask-who-text').textContent = who.known
+    ? `${who.name} · ${who.online ? 'online' : 'offline'}`
+    : 'no assistant yet';
+
+  $('ask-clear').hidden = !(current && msgs.length);
+  if (current) $('ask-clear').dataset.askDelete = current.id;
+
+  const needsSetup = !state.askReady || !who.known;
+  $('ask-setup').hidden = !needsSetup;
+  if (needsSetup) $('ask-setup').innerHTML = setupHtml();
+
+  // Everything else you have said, one tap away but never in the way.
+  const others = all.filter((c) => c.id !== current?.id);
+  $('ask-history').hidden = !others.length;
+  $('ask-history-label').textContent = plural(others.length, 'earlier conversation');
+  $('ask-history-list').innerHTML = others.map((c) => {
+    const at = new Date(c.at).toISOString();
+    return `
+    <a class="row" href="${esc(askHref(c.id))}">
+      <span class="row-top">
+        <span class="row-name">${esc(c.title)}</span>
+        ${c.pending ? '<span class="tag" data-status="running"><i class="dot"></i>answering</span>' : ''}
+        <span class="row-when" data-ago="${esc(at)}">${ago(at)}</span>
+      </span>
+      <span class="row-sub">${esc(clip(c.last?.text || 'nothing said yet', 90))}</span>
+    </a>`;
+  }).join('');
+
+  $('ask-thread').innerHTML = askTurns(msgs).map(({ you, reply }) => `
+    <div class="turn">
+      ${you ? `<div class="msg you" title="${esc(stamp(you.created_at))}">${esc(you.text)}</div>` : ''}
+      ${reply ? askReplyHtml(reply, { who, queue }) : ''}
+    </div>`).join('');
+
+  const blank = !msgs.length;
+  $('ask-open').hidden = !blank;
+  if (blank) {
+    $('ask-starters').innerHTML = STARTERS.map(starterHtml).join('');
+    $('ask-open-p').textContent = who.online
+      ? `${who.name} is awake on your PC right now — ask it something and the answer `
+        + 'comes back here.'
+      : 'It answers on your PC and the reply comes back here. Ask anyway if the PC is '
+        + 'off: the message is picked up the moment it wakes.';
+  }
+}
+
+/** Replies in flight: the number on the Ask door and on its tab. */
+export function renderAskBadge() {
+  const n = askPending().length;
+  $('ask-count').textContent = n ? String(n) : '';
+  const pip = $('tab-ask-count');
+  pip.textContent = n ? String(n) : '';
+  pip.hidden = !n;
+}
+
+/**
+ * Home's half of the merge: whether the assistant is there, what you last
+ * said to it, and a way in without opening the screen first.
+ */
+export function renderAskHome() {
+  const who = askPresence();
+  const all = askChats();
+  const latest = all[0] ?? null;
+  const queue = askPending();
+
+  $('ask-block-note').textContent = presenceWord(who);
+
+  const rows = [
+    ['Assistant', who.known ? esc(who.name) : 'none has checked in'],
+    ['State', who.known
+      ? `<span class="state" data-status="${who.online ? 'done' : 'paused'}">
+           <i class="dot${who.online ? ' live' : ''}"></i>${who.online ? 'online' : 'offline'}</span>`
+      : '<span class="state" data-status="error"><i class="dot"></i>never seen</span>'],
+    ['Last heard', who.lastSeen
+      ? `<span data-since="${esc(who.lastSeen)}">${since(who.lastSeen)}</span>`
+      : '—'],
+    ['Conversations', all.length
+      ? `${plural(all.length, 'thread')}${queue.length ? ` · ${queue.length} answering` : ''}`
+      : 'none yet'],
+  ];
+
+  $('ask-card').innerHTML = rows.map(([k, v]) => `
+    <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
+    .join('') + `<p class="info-note">${esc(askExplainer())}</p>`;
+
+  // Carry on where you were, or open with something worth asking.
+  const quick = latest && latest.messages.length
+    ? [`<a class="chip" href="${esc(askHref(latest.id))}">${icon('brain')}<span>${
+        esc(clip(latest.title, 32))}</span></a>`]
+    : [];
+  for (const [i, st] of STARTERS.slice(0, 2).entries()) {
+    quick.push(`<button type="button" class="chip" data-ask-starter="${i}">${
+      icon(st.icon)}<span>${esc(clip(st.text, 34))}</span></button>`);
+  }
+  $('ask-quick').innerHTML = quick.join('');
 }
 
 // ── project chat ──────────────────────────────────────────────────────

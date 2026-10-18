@@ -84,6 +84,10 @@
         New project
       </button>
       <div class="nav-row">
+        <a id="ask-link" class="btn ghost" href="#/ask">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
+          Ask<span id="ask-count" class="count"></span>
+        </a>
         <a id="agents-link" class="btn ghost" href="#/agents">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bot"/></svg>
           Agents<span id="agents-count" class="count"></span>
@@ -179,6 +183,15 @@
             <span id="active-more-text">All agents</span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arrow"/></svg>
           </a>
+        </section>
+
+        <section id="ask-block" class="block">
+          <h2 class="block-h">
+            <span>Your assistant</span>
+            <span id="ask-block-note" class="block-note"></span>
+          </h2>
+          <a id="ask-card" class="card info-card" href="#/ask"></a>
+          <div id="ask-quick" class="chip-row"></div>
         </section>
 
         <section id="usage-block" class="block">
@@ -280,6 +293,49 @@
       <section id="chat-view" class="view" hidden>
         <div id="chat-head" class="chat-head" hidden></div>
         <div id="thread" class="thread"></div>
+      </section>
+
+      <!-- ── ask: your own assistant, relayed through your PC ──── -->
+      <section id="ask-view" class="view" hidden>
+        <div id="ask-head" class="chat-head">
+          <div class="chat-title">
+            <h2 id="ask-title">Assistant</h2>
+            <span class="meta">
+              <button id="ask-presence" class="pill" type="button">
+                <i class="dot"></i><span id="ask-presence-text">checking…</span>
+              </button>
+              <button id="ask-new" class="btn tiny ghost" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+                new chat
+              </button>
+              <button id="ask-clear" class="btn tiny ghost" type="button" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"/></svg>
+                delete
+              </button>
+            </span>
+          </div>
+          <span id="ask-stats" class="chat-stats"></span>
+        </div>
+
+        <div id="ask-setup" class="card info-card" hidden></div>
+
+        <details id="ask-history" class="fold" hidden>
+          <summary><span id="ask-history-label">Earlier conversations</span></summary>
+          <div id="ask-history-list" class="stack"></div>
+        </details>
+
+        <div id="ask-thread" class="thread"></div>
+
+        <div id="ask-open" hidden>
+          <div class="empty">
+            <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
+            <h3>Your assistant, from anywhere</h3>
+            <p id="ask-open-p">It answers on your PC and the reply comes back here. Ask
+               it something — or if the PC is off, ask anyway: it picks the message up
+               the moment it wakes.</p>
+          </div>
+          <div id="ask-starters" class="suggest-list"></div>
+        </div>
       </section>
 
       <!-- ── agents: every run at once ──────────────────────── -->
@@ -502,6 +558,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sliders"/></svg>
             <span id="opts-summary">high · cap 90%</span>
           </button>
+          <button type="button" id="ask-who" class="chip" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
+            <span id="ask-who-text">your assistant</span>
+          </button>
           <span class="grow"></span>
           <span id="send-hint" class="send-hint"></span>
           <button type="submit" id="send" class="send-btn" aria-label="Send">
@@ -517,6 +577,11 @@
       <a id="tab-home" class="tab" href="#/">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-home"/></svg>
         <span>Home</span>
+      </a>
+      <a id="tab-ask" class="tab" href="#/ask">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
+        <span>Ask</span>
+        <i id="tab-ask-count" class="tab-count" hidden></i>
       </a>
       <a id="tab-agents" class="tab" href="#/agents">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bot"/></svg>

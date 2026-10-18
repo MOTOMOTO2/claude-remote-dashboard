@@ -72,6 +72,30 @@ export function seed() {
   ];
 
   fake.tables.hosts = [{ name: 'desk-pc', last_seen: new Date().toISOString() }];
+
+  // Your own assistant: a bridge that is awake, one conversation it answered
+  // and an older one, so the history fold and the markdown path both have
+  // something real to draw.
+  fake.tables.assistants = [
+    { owner: 'u1', name: 'jarvis', model: 'llama3', last_seen: new Date().toISOString() },
+  ];
+
+  fake.tables.chats = [
+    { id: 'c1', owner: 'u1', title: null, created_at: iso(50), updated_at: iso(48) },
+    { id: 'c2', owner: 'u1', title: 'Fixing the printer', created_at: iso(900), updated_at: iso(880) },
+  ];
+
+  fake.tables.chat_messages = [
+    { id: 1, chat_id: 'c1', owner: 'u1', role: 'user', status: 'done', created_at: iso(50),
+      text: 'what should I build next?' },
+    { id: 2, chat_id: 'c1', owner: 'u1', role: 'assistant', status: 'done', created_at: iso(49),
+      text: '## Two ideas\n\n- a **snake** game\n- a `csv` cleaner' },
+    { id: 3, chat_id: 'c2', owner: 'u1', role: 'user', status: 'done', created_at: iso(900),
+      text: 'the printer says offline again' },
+    { id: 4, chat_id: 'c2', owner: 'u1', role: 'assistant', status: 'done', created_at: iso(899),
+      text: 'Power-cycle it, then re-add it over IP rather than USB.' },
+  ];
+
   return fake;
 }
 
