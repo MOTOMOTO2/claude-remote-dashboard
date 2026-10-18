@@ -188,7 +188,7 @@ probe over every prompt and summary) and runs the recipes against it:
 
 | It notices | It offers |
 |---|---|
-| the last run failed | **Fix what broke in X** — with the real error pasted into the prompt |
+| the last run failed | **Fix what broke in X** — with the real error pasted into the prompt — unless the desktop was signed out (below) |
 | finished, but only on your desktop | **Put X on GitHub** |
 | finished, and no README has come up | **Write a README for X** |
 | finished, and nothing has mentioned tests | **Add tests to X** |
@@ -196,6 +196,12 @@ probe over every prompt and summary) and runs the recipes against it:
 | browser-ish, nothing deployed | **Put X online** |
 | a repo you have never run a job against | **Take a look at X** |
 | several runs in, nothing else to say | **Tighten up X** |
+
+A run that dies because Claude Code on the desktop is signed out ("Failed to
+authenticate: OAuth session expired…") is not the project's fault, so no fix is
+offered for it. Instead the chat says so, home shows a *desktop signed out*
+chip until a later run finishes, and the toast says what to do: run `claude`
+on the PC, `/login`, then *run again*.
 
 A project with a job in flight is skipped — it's already busy. No project
 contributes more than two, the list round-robins so the first screenful spans

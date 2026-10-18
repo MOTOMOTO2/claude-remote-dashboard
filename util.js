@@ -140,3 +140,17 @@ export function clip(s, n = 120) {
 
 /** First line of a prompt — a decent stand-in for a title. */
 export const firstLine = (s) => clip(String(s ?? '').split('\n')[0], 90);
+
+// ── failures ──────────────────────────────────────────────────────────
+
+/**
+ * Whether a run died because Claude Code on the desktop is signed out — an
+ * expired OAuth session, a revoked token, a missing login. Nothing in the
+ * project is broken, so asking an agent to "fix" it only fails again; the
+ * fix is `/login` on the PC.
+ */
+const SIGNED_OUT = /failed to authenticate|oauth (session|token)[^.]*(expired|invalid|revoked)|could not be refreshed|authentication_error|invalid (x-)?api[ -]key|please run \/login|not logged in/i;
+export const signedOut = (error) => SIGNED_OUT.test(String(error ?? ''));
+
+export const SIGNED_OUT_FIX = 'Claude Code on your desktop is signed out. On the PC, run '
+  + '`claude`, type /login and sign in again, then press run again here.';

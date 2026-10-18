@@ -1,7 +1,7 @@
 // Entry point: boot, auth, view switching, the composer, and the handful of
 // listeners that tie the store to the views.
 
-import { $, firstLine } from './util.js';
+import { $, firstLine, signedOut, SIGNED_OUT_FIX } from './util.js';
 import * as store from './store.js';
 import * as views from './views.js';
 import {
@@ -498,8 +498,11 @@ store.on('finish', (job) => {
     toast(`${name} finished`, { glyph: 'check' });
     notify(`${name} finished`, firstLine(job.prompt));
   } else if (job.status === 'error') {
-    toast(`${name} failed`, { bad: true });
-    notify(`${name} failed`, job.error ?? firstLine(job.prompt));
+    const auth = signedOut(job.error);
+    toast(auth ? 'Desktop signed out — run /login on the PC' : `${name} failed`,
+      { bad: true, ms: auth ? 6000 : undefined });
+    notify(auth ? 'Desktop signed out' : `${name} failed`,
+      auth ? SIGNED_OUT_FIX : job.error ?? firstLine(job.prompt));
   }
 });
 
