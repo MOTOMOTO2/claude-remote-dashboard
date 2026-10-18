@@ -2,13 +2,14 @@
   "name": "claude-remote-dashboard",
   "version": "1.0.0",
   "private": true,
-  "description": "Mobile-first dashboard for queueing coding jobs to your desktop",
+  "description": "Mobile-first dashboard for queueing coding jobs to your desktop and talking to your own assistant",
   "type": "module",
   "scripts": {
-    "test": "node tools/contrast.mjs && node --import ./test/register.mjs test/smoke.mjs",
+    "test": "node tools/contrast.mjs && node --import ./test/register.mjs test/smoke.mjs && node test/bridge.mjs",
     "contrast": "node tools/contrast.mjs",
     "serve": "node tools/serve.mjs",
-    "preview": "node --import ./test/register.mjs tools/preview.mjs"
+    "preview": "node --import ./test/register.mjs tools/preview.mjs",
+    "bridge": "node bridge/bridge.mjs"
   },
   "devDependencies": {
     "jsdom": "^27.0.0"
