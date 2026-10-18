@@ -1,18 +1,28 @@
 # claude-remote — dashboard
 
 The phone half of **claude-remote**: a small web app for queueing coding jobs to
-the Claude Code runner on your desktop, and watching them work from anywhere.
+the Claude Code runner on your desktop, talking to the assistant you built
+yourself, and watching both work from anywhere.
 
 You type what to build. The job lands in Supabase. Your desktop picks it up,
 creates the repo, writes the code, pushes it — and streams its log back here
-while it does. This repo is only the dashboard; the runner that claims jobs and
-drives Claude Code lives on the PC.
+while it does. You type a question instead, and the same relay carries it to
+your own assistant on the same PC, which streams its answer back the same way.
+
+This repo is the dashboard and the small bridge that keeps your assistant
+reachable (`bridge/`). The runner that claims coding jobs and drives Claude
+Code lives on the PC, in its own repo.
 
 ```
 ┌──────────┐   insert job    ┌──────────┐   claim job    ┌─────────────┐
 │ this app │ ──────────────▶ │ Supabase │ ◀───────────── │ desktop     │
 │  (phone) │ ◀────────────── │          │ ─────────────▶ │ runner      │
-└──────────┘  realtime log   └──────────┘  log + status  └─────────────┘
+│          │  realtime log   │          │  log + status  └─────────────┘
+│          │                 │          │                ┌─────────────┐
+│          │   ask a thing   │          │  claims it     │ assistant   │
+│          │ ──────────────▶ │          │ ◀───────────── │ bridge      │
+└──────────┘ ◀────────────── └──────────┘ ─────────────▶ │ → your AI   │
+              the reply, live              streams back  └─────────────┘
 ```
 
 ## What it gives you
@@ -23,6 +33,13 @@ drives Claude Code lives on the PC.
   — the fortnight of runs, the finished jobs, the desktop itself — is one tap
   behind *More detail* on a phone and the right-hand column on a wide screen.
   See [Less on screen at once](#less-on-screen-at-once).
+- **Your own assistant, from anywhere** — `#/ask` is the AI you built,
+  talked to the way you talk to Claude: threads, Markdown replies, an answer
+  that streams in word by word. It runs on your PC and is reachable for
+  exactly as long as the PC is on, through the same relay the agents use —
+  no port open, no tunnel, nothing sent to anyone else's model. A reply
+  always says where it is: *typing…*, *waiting its turn · 2 ahead*, or
+  *waiting for your PC*. See [Your own assistant](#your-own-assistant).
 - **Several agents at once** — `#/agents` is the fleet: a card per agent with
   what it is doing this second and the tail of its own log, a ceiling you set
   (1–6) that your desktop claims against, and a queue where every job says what
@@ -108,12 +125,155 @@ set and there is no `fly secrets set` to run. Pointing a deployment at a
 different Supabase project means editing `config.js`, because a static file
 is read by the browser, not by the container.
 
+The assistant needs nothing here either. Its bridge runs on your PC and talks
+*outward* to Supabase, so a deployment of this app never holds a key for it —
+which is also why the container can scale to zero and your assistant stays
+reachable regardless.
+
 ### On a phone
 
 Open the URL, then **Add to Home Screen**. Sign in *inside that app* — on iOS a
 home-screen install gets its own storage, separate from Safari, so a session
 created in the browser is not visible to it. If storage is blocked entirely
 (Private tabs do this), the sign-in screen says so rather than silently failing.
+
+## Your own assistant
+
+The dashboard already knew how to reach your PC from a phone without opening
+a port: write a row to Supabase, let the desktop claim it, stream the result
+back. That path works just as well for a conversation as for a build — so
+`#/ask` is the assistant *you* wrote, talked to the way you talk to Claude.
+
+```
+┌──────────┐  your message   ┌──────────┐   claims it    ┌─────────────┐
+│ this app │ ──────────────▶ │ Supabase │ ◀───────────── │  bridge.mjs │
+│  (phone) │ ◀────────────── │          │ ─────────────▶ │  → your AI  │
+└──────────┘ the reply, live └──────────┘  streams back  └─────────────┘
+```
+
+Nothing listens for inbound connections, nothing needs a static IP or a
+tunnel, and your messages reach no model but yours. The assistant is
+reachable for exactly as long as the bridge process is up — which is to say,
+as long as the PC is on.
+
+- **Threads, not transcripts.** A conversation per subject, named after the
+  first thing you asked, newest open by default. Replies render as Markdown,
+  the same renderer an agent's summary uses.
+- **The answer arrives as it is written.** The bridge streams into one row
+  and the dashboard draws it growing. Before the first word there are three
+  dots; while it writes, the header says *typing…*.
+- **A reply always says where it is.** This is the part that had to be right:
+  a message sent to a sleeping PC says **waiting for your PC — answered as
+  soon as it is on again**, one behind others says **waiting its turn · 2
+  ahead**, and *typing…* is only ever printed over something that is actually
+  typing. Those sentences come from `assistant.js`, which is pure and unit
+  tested, for the same reason `fleet.js` is.
+- **Ask with the PC off.** The message and the empty reply it is owed are
+  written together, so the thread shows an answer on its way either way. Put
+  the phone down; the reply lands when the machine wakes, and says so.
+- **The two halves meet.** An answer worth building has a *hand to an agent*
+  button: it opens the new-project composer with the text already in it.
+- **It tells you when it answered.** A reply that lands while you are on
+  another screen raises a toast and a notification. One that lands while you
+  are watching does not — the words appearing are the news.
+
+### The bridge
+
+`bridge/bridge.mjs` is the PC half: one dependency-free Node script, about
+300 lines, that claims whatever you send, asks your assistant, and streams
+the answer back. It does not know what your assistant *is*. It knows two ways
+to ask something a question:
+
+| Set this | For |
+|---|---|
+| `ASSISTANT_CMD` | a command — a Python script, a Node script, a CLI you wrote |
+| `ASSISTANT_URL` | an HTTP endpoint — yours, Ollama, llama.cpp, LM Studio, anything OpenAI-shaped |
+
+A command gets the question three ways, so it fits whatever your script
+already reads:
+
+```sh
+$ASSISTANT_PROMPT        # the latest question
+$ASSISTANT_TRANSCRIPT    # the whole conversation as plain text
+stdin                    # {"messages":[{"role","content"}],"prompt":"…"}
+```
+
+Whatever it prints on stdout is the reply, streamed to your phone as it is
+printed. Exit non-zero and whatever went to stderr becomes the error shown in
+the chat, so a broken assistant says why rather than going quiet.
+
+An endpoint is sent `{messages, prompt, input, stream}` — over-complete on
+purpose, so one request body fits every dialect — and may answer with
+server-sent events, newline-delimited JSON, one JSON body, or plain text.
+`bridge/reply.mjs` unwraps OpenAI, Anthropic and Ollama shapes, and falls
+back to `reply` / `text` / `answer` / `output` / `response` for an endpoint
+you wrote yourself. A line it cannot parse is passed through as prose rather
+than dropped, because losing the answer is worse than printing a stray brace.
+
+### Setting it up
+
+```sh
+# 1. the tables — paste bridge/schema.sql into the Supabase SQL editor once
+# 2. the configuration
+cp bridge/.env.example bridge/.env     # then fill it in
+
+# 3. prove your assistant answers, without Supabase in the way
+node bridge/bridge.mjs --try "hello"
+
+# 4. leave it running
+node bridge/bridge.mjs
+```
+
+`--try` runs the adapter and nothing else: it prints the reply as it streams
+and tells you how many characters came back. If that works, the phone works.
+There is also `--once`, which answers a single message and exits.
+
+`bridge/example-assistant.mjs` is a stand-in that answers a few questions
+with `if` statements, so step 3 works before your own assistant is wired in.
+It is also the shape to copy.
+
+**Keeping it up.** "Reachable as long as the PC is on" is only true if
+something starts the bridge when the PC starts. On Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File bridge\run-at-logon.ps1
+```
+
+That registers a Scheduled Task — at logon, restarted if it stops, no console
+window — and prints how to start it now, check on it, and undo it. Nothing in
+this repo runs it for you. Anywhere else, the usual suspects work: `pm2 start
+bridge/bridge.mjs`, a systemd unit, `launchd`.
+
+**Signing in.** Prefer `SUPABASE_ANON_KEY` with `SUPABASE_EMAIL` and
+`SUPABASE_PASSWORD`: the bridge signs in as you, row-level security still
+applies, and no service-role key ends up on that disk. It re-signs-in by
+itself when the hour-long token expires. If you would rather reuse the
+service key the coding runner already has, set `SUPABASE_SERVICE_KEY`
+instead — it bypasses RLS, so keep it on that one machine.
+
+### The tables it wants
+
+`bridge/schema.sql` adds three, and changes nothing that is already there:
+
+| Table | What is in it |
+|---|---|
+| `chats` | one row per conversation: `id, owner, title, created_at, updated_at` |
+| `chat_messages` | one row per turn: `chat_id, role, text, status, error, cancel_requested` |
+| `assistants` | the bridge's heartbeat: `owner, name, model, last_seen` |
+
+A message's `status` is `queued`, `streaming`, `done` or `error`. An
+assistant counts as online if `last_seen` is under 30 seconds old — the same
+rule the desktop runner gets.
+
+All three are optional. An account whose schema predates this keeps working;
+the Assistant screen says which migration has not run rather than throwing,
+exactly like the agent ceiling.
+
+The schema also adds `chat_messages` to the realtime publication and sets its
+replica identity, because a reply streams in as repeated `UPDATE`s to one
+row. Skip that and replies arrive in lumps instead of not at all: the app
+polls the newest messages every 1.5 seconds *while something is pending*, and
+stops the moment nothing is.
 
 ## Several agents at once
 
@@ -296,15 +456,19 @@ mid-watch, a live log line landing on its card, the ceiling changed from another
 device and published from this one, a job queued behind its own project, stop
 all), the phone layout (home folding its reference blocks, the limits block
 leading with the tightest window, tabs and composer never sharing the bottom of
-the window), the ideas view and its filters, the projects view with its search,
-filters and sort, re-reading and failing to read the limits, clearing a chat,
-the drawer, keyboard shortcuts, theming, and the Markdown renderer. It also checks the static invariants a
+the window), the assistant screen (an answered thread, sending a message, the answer
+streaming in and finishing, a PC that is switched off, a reply queued behind
+another, an answer that failed, a bridge that has never checked in, a schema
+that predates the feature, handing an answer to an agent, deleting a
+conversation), the ideas view and its filters, the projects view with its
+search, filters and sort, re-reading and failing to read the limits, clearing
+a chat, the drawer, keyboard shortcuts, theming, and the Markdown renderer. It also checks the static invariants a
 vanilla app has no compiler for — every `$('id')` exists in the HTML, every icon
 referenced is in the sprite, every module is listed in the service-worker shell,
 and the recurring timer still re-reads usage (it stopped once, and nothing else
 in here would have noticed).
 
-Five things get unit coverage against fixed inputs rather than fixtures,
+Seven things get unit coverage against fixed inputs rather than fixtures,
 because a plausible-looking wrong answer is worse there than a crash: the reset
 labels (`dayClock`, `until`, `span` — a weekly limit must never claim it resets
 this afternoon), the suggestion engine (a busy project is left alone, a lost one
@@ -316,7 +480,13 @@ sync, a link that isn't a web address never becomes one) and the fleet model (a
 paused agent keeps its slot, a second job on a busy project waits for the
 project rather than a slot, the queue is read in the order the runner would
 claim it, a ceiling lowered under a running fleet is reported rather than
-hidden).
+hidden), the assistant model (a bridge that has never checked in is not the
+same as one that is offline, a reply with the PC asleep never claims to be
+typing, a streaming reply does even if the heartbeat went stale, a
+conversation with nothing in it still has a name) and the bridge's adapters
+(every response dialect it claims to understand, a stream split mid-token, an
+error arriving mid-stream thrown rather than printed as the answer, and a
+line it cannot parse kept as prose rather than dropped).
 
 `npm run contrast` is the other half of the net. It parses the tokens out of
 `style.css` and asserts the claims this README makes about them: every ink
@@ -338,8 +508,8 @@ npm run preview -- home dark
 
 Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
-Supabase project at all. Views: `home`, `agents`, `chat`, `new`, `ideas`,
-`projects`, `auth`, `empty`. Themes: `light`, `dark`, `mobile`. (`preview/` is gitignored.)
+Supabase project at all. Views: `home`, `agents`, `ask`, `chat`, `new`,
+`ideas`, `projects`, `auth`, `empty`. Themes: `light`, `dark`, `mobile`. (`preview/` is gitignored.)
 
 To screenshot one headlessly:
 
@@ -360,6 +530,7 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `store.js` | Supabase client, the in-memory mirror, realtime, mutations |
 | `views.js` | Rendering. Reads state, writes DOM; never queries |
 | `fleet.js` | Slots, what holds them, and what each queued job waits for. Pure |
+| `assistant.js` | Your assistant: presence, where a reply is, conversations. Pure |
 | `suggest.js` | The next step for a project you have, read off its thread. Pure |
 | `ideas.js` | Whole new projects, read off the themes your work shows. Pure |
 | `catalog.js` | The Projects screen's model: every project, its runs, its live link. Pure |
@@ -372,6 +543,11 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `tools/icon.mjs` | Redraws `icon.png` from the brand geometry |
 | `tools/preview.mjs` | Freezes one screen to static HTML for a look |
 | `tools/serve.mjs` | The static server — in development and in the container |
+| `bridge/bridge.mjs` | The PC half: claims what you asked, streams the answer back |
+| `bridge/reply.mjs` | The two adapters, and every guess about a response shape |
+| `bridge/schema.sql` | The three tables a conversation needs |
+| `bridge/example-assistant.mjs` | A stand-in assistant, and the shape to copy |
+| `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
 | `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
 
 ## Data it expects
@@ -387,6 +563,9 @@ the signed-in user:
 | `projects` | `name, full_name, is_local, private, pushed_at`, and from the catalogue migration `description, language, topics, stars, is_fork, is_archived, live_url, live_kind` |
 | `hosts` | `name, last_seen` |
 | `settings` | `owner, max_parallel` — optional; see [Several agents at once](#several-agents-at-once) |
+| `chats` | `id, owner, title, created_at, updated_at` — optional; see [Your own assistant](#your-own-assistant) |
+| `chat_messages` | `id, chat_id, owner, role, text, status, error, cancel_requested, created_at` |
+| `assistants` | `owner, name, model, last_seen` |
 
 A job's `status` is `queued`, `running`, `paused`, `done` or `error`. A desktop
 counts as online if its `last_seen` is under 30 seconds old.
@@ -446,6 +625,27 @@ counts as online if its `last_seen` is under 30 seconds old.
   the number reached Supabase at all, and the queue reasons are derived from
   rules the runner is expected to keep (a slot per agent, one agent per
   project) rather than from anything this page can observe.
+- **The bridge is an adapter, not an integration.** Your assistant lives in
+  another folder on this machine, outside this project, so this repo was
+  written without reading a line of it. Rather than guess at its interface,
+  the bridge takes a command or a URL and normalises whatever comes back —
+  which also means swapping the assistant behind it is one line of `.env`
+  and no code. `--try` exists for the same reason: the first thing to find
+  out is whether *your* half answers, with none of this in the way.
+- **One message at a time.** The bridge answers serially even though the
+  agents run in parallel. Your assistant is one process on one machine, and
+  two replies streaming at once would only fight over it — so the queue says
+  "2 ahead" instead, which is true and visible.
+- **The empty reply row is written up front.** The alternative is for the
+  bridge to create it when it claims the message, which is tidier right up
+  until the PC is off: then a message you sent has nothing to show for
+  itself. Writing it with the question means the thread can say *waiting for
+  your PC* instead of looking like it was never sent.
+- **Six tabs, not five.** Five is the convention and one of these could have
+  been demoted to the drawer instead. But the assistant is the thing you
+  reach for with a phone in your hand, and burying it behind a slide-out
+  would have made "always accessible" quietly untrue. The labels elide and
+  shrink below 390px rather than anything being dropped.
 - **Tabs on a phone, a drawer on a desktop.** The drawer still holds the
   project list, the search and the account controls, but navigating with it
   meant two taps and a slide for every screen. The tabs cost a strip at the
@@ -470,6 +670,7 @@ counts as online if its `last_seen` is under 30 seconds old.
 | `/` | Focus the composer |
 | `n` | New project |
 | `a` | Agents |
+| `k` | As**k** your assistant |
 | `i` | Ideas |
 | `p` | Projects |
 | `Esc` | Close the drawer, the options panel, or unfocus the composer |
