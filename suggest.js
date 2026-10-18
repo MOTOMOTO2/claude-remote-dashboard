@@ -7,7 +7,7 @@
 // ready-to-send prompt, with the reason shown next to it so you can tell why
 // it is being offered.
 
-import { clip, firstLine } from './util.js';
+import { clip, firstLine, signedOut } from './util.js';
 
 const ACTIVE = new Set(['queued', 'running', 'paused']);
 
@@ -36,7 +36,8 @@ const RECIPES = [
     kind: 'fix',
     icon: 'wrench',
     weight: 100,
-    when: (p) => p.last?.status === 'error',
+    // A sign-in failure is the desktop's, not the project's: no prompt fixes it.
+    when: (p) => p.last?.status === 'error' && !signedOut(p.last.error),
     title: (p) => `Fix what broke in ${p.slug}`,
     why: (p) => (p.last.error ? `last run failed — ${clip(p.last.error, 64)}` : 'its last run failed'),
     prompt: (p) => `The last run failed${p.last.error ? ` with:\n\n${p.last.error}\n` : '.'}\n`

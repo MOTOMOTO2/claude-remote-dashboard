@@ -877,6 +877,32 @@ fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'error' });
 await tick();
 ok('nothing is raised once it is off', window.notifications.length === 1);
 
+// A run that died because the desktop's Claude login expired says so, and
+// says what to do on the PC — the project itself is not what broke.
+const AUTH = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+window.location.hash = '#/';
+fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'running' });
+await tick();
+fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'error', error: AUTH,
+  created_at: new Date().toISOString() });
+await tick();
+has('home flags a signed-out desktop', el('hero-chips').textContent, 'desktop signed out');
+has('the toast says where to fix it', el('toasts').textContent, '/login');
+
+window.location.hash = '#/p/gamma';
+await tick();
+const authNote = el('thread').querySelector('[data-signed-out]');
+ok('the chat explains a sign-in failure', Boolean(authNote));
+has('and names the fix', authNote?.textContent ?? '', '/login');
+has('the raw error is still shown', el('thread').textContent, 'could not be refreshed');
+
+fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'done', error: null,
+  created_at: new Date().toISOString() });
+window.location.hash = '#/';
+await tick();
+ok('a later finished run clears the flag',
+  !el('hero-chips').textContent.includes('desktop signed out'));
+
 // ── 15. coming back to an empty account ───────────────────────────────
 
 window.location.hash = '#/';
@@ -996,6 +1022,21 @@ const failed = suggest({
 ok('a failed run is suggested first', failed[0].kind === 'fix', kinds(failed).join());
 has('the fix prompt quotes the error', failed[0].prompt, 'boom');
 ok('the fix is aimed at that project', failed[0].slug === 'solo');
+
+const signedOutRun = suggest({
+  jobs: [{ id: 'a', project_slug: 'solo', status: 'error', created_at: iso(5),
+    prompt: 'build a thing',
+    error: 'Failed to authenticate: OAuth session expired and could not be refreshed' }],
+  projects: [{ name: 'solo', full_name: 'me/solo' }],
+});
+ok('a desktop sign-in failure is not offered as something to fix',
+  !kinds(signedOutRun).includes('fix'), kinds(signedOutRun).join());
+
+const { signedOut } = await import('../util.js');
+ok('an expired OAuth session reads as signed out',
+  signedOut('Claude Code returned an error result: Failed to authenticate: OAuth session expired and could not be refreshed'));
+ok('an ordinary failure does not read as signed out', !signedOut('npm ERR! ETARGET'));
+ok('no error is not signed out', !signedOut(null));
 
 const local = suggest({
   jobs: [{ id: 'a', project_slug: 'solo', status: 'done', created_at: iso(5),

@@ -3,7 +3,7 @@
 
 import {
   $, esc, ago, elapsed, dayClock, until, when, stamp, plural, clip,
-  firstLine, dayKey, weekday,
+  firstLine, dayKey, weekday, signedOut, SIGNED_OUT_FIX,
 } from './util.js';
 import { md } from './md.js';
 import { icon, setBadge, isNarrow } from './ui.js';
@@ -967,6 +967,14 @@ export function renderHome() {
   if (!active.length && !bare) {
     chips.push(`<span class="stat-chip">Nothing in progress</span>`);
   }
+  // The newest settled run decides it: one that finished after a sign-in
+  // failure means the desktop has logged back in.
+  const lastSettled = all.filter((j) => j.status === 'done' || j.status === 'error')
+    .sort(newest)[0];
+  if (lastSettled?.status === 'error' && signedOut(lastSettled.error)) {
+    chips.push(`<a class="stat-chip" data-status="error" href="${esc(jobHref(lastSettled))}"
+      title="${esc(SIGNED_OUT_FIX)}"><i class="dot"></i>desktop signed out — run /login</a>`);
+  }
   if (!state.hostFresh && !bare) {
     chips.push(`<span class="stat-chip" data-status="paused"><i class="dot"></i>desktop offline</span>`);
   }
@@ -1122,7 +1130,12 @@ function replyHtml(job) {
       ${paused}
       ${body}
       ${logBlock}
-      ${job.error ? `<p class="note bad" data-status="error">${esc(job.error)}</p>` : ''}
+      ${job.error && signedOut(job.error) ? `
+        <p class="note bad" data-status="error" data-signed-out><strong>Desktop signed out.</strong>
+          ${esc(SIGNED_OUT_FIX)}</p>
+        <p class="muted small">${esc(job.error)}</p>` : ''}
+      ${job.error && !signedOut(job.error)
+        ? `<p class="note bad" data-status="error">${esc(job.error)}</p>` : ''}
       <div class="msg-actions">${actions}</div>
     </div>`;
 }
