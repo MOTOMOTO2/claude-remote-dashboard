@@ -955,6 +955,24 @@ el('ask-setup').querySelector('[data-ask-recheck]').click();
 await tick();
 ok('checking again while it is still missing keeps the card up', !el('ask-setup').hidden);
 
+// The SQL is fetched rather than inlined, so there is one copy of it — which
+// means the offline case has to be handled: a service worker answers any miss
+// with the app shell, and a page of HTML on the clipboard labelled "SQL" is
+// worse than refusing.
+const realFetch = globalThis.fetch;
+window.copied.length = 0;
+globalThis.fetch = async () => ({ ok: true, text: async () => file('bridge/schema.sql') });
+el('ask-setup').querySelector('[data-copy-schema]').click();
+await tick();
+has('the copy button copies the migration itself', window.copied.at(-1) ?? '', 'create table');
+
+window.copied.length = 0;
+globalThis.fetch = async () => ({ ok: true, text: async () => '<!doctype html><html>the app shell</html>' });
+el('ask-setup').querySelector('[data-copy-schema]').click();
+await tick();
+ok('and refuses the app shell the offline cache would hand back', window.copied.length === 0);
+globalThis.fetch = realFetch;
+
 fake.failTable('chats', null);
 fake.tables.assistants = [
   { owner: 'u1', name: 'jarvis', model: 'llama3', last_seen: new Date().toISOString() },
