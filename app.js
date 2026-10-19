@@ -408,7 +408,8 @@ async function tapHouse(commands) {
     ? `${rows.length} devices`
     : store.deviceOf(rows[0]?.entity_id)?.name ?? 'it';
   if (st.kind === 'relay-off' || st.kind === 'never') {
-    toast(`Queued — ${what} changes when your PC is back`, { glyph: 'house', ms: 4000 });
+    toast(`Queued — ${what} changes when ${store.housePresence().needsPc
+      ? 'your PC is back' : 'a relay is back'}`, { glyph: 'house', ms: 4000 });
   } else if (st.kind === 'hub-off') {
     toast(`Sent, but ${store.housePresence().name} is not answering`, { bad: true, ms: 4000 });
   } else {

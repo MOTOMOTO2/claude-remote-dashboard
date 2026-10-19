@@ -12,6 +12,7 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -133,6 +134,11 @@ const bridgeEnv = (port, cmd, extra = {}) => ({
   HA_NAME: '',
   HA_SENSORS: '',
   HA_EXCLUDE: '',
+  // Explicitly blank, so a developer who has these exported for their own
+  // hub does not get a different test run from everybody else.
+  HOUSE_RELAY: '',
+  HOUSE_RELAY_HOST: '',
+  HOUSE_RELAY_PRIORITY: '',
   ...extra,
 });
 
@@ -312,11 +318,15 @@ function startTables(tables) {
 
     if (req.method === 'POST') {
       // A mirror writes a page of devices at once; everything else writes one.
+      // The key is whatever that table's primary key is — house_hubs is one
+      // row per *relay*, so two relays checking in make two rows, not one
+      // they take turns overwriting.
       const rows = (Array.isArray(body) ? body : [body]).map((one) => {
         const key = one.entity_id ?? one.owner;
         const found = key && tables[table].find((r) => (one.entity_id
           ? r.entity_id === one.entity_id && r.owner === one.owner
-          : r.owner === one.owner && table === 'house_hubs'));
+          : r.owner === one.owner && table === 'house_hubs'
+            && String(r.relay ?? '') === String(one.relay ?? '')));
         if (found) { Object.assign(found, one); return found; }
         const row = { id: `job-${tables[table].length + 1}`, status: 'queued', created_at: new Date().toISOString(), ...one };
         tables[table].push(row);
@@ -640,6 +650,181 @@ const entity = (id, state, attributes = {}) => ({ entity_id: id, state, attribut
     tables.house_hubs[0]?.reachable === false && /unreachable/.test(tables.house_hubs[0]?.error ?? ''),
     JSON.stringify(tables.house_hubs[0]));
   server.close();
+}
+
+// ── 8. two relays, one house ──────────────────────────────────────────
+// The setup that makes the house reachable while you are out: the add-on on
+// the hub, which is always up, *and* the bridge on the PC, which is not.
+// Both check in and either can obey a tap — but only one writes devices,
+// because two relays with different HA_EXCLUDE settings would otherwise
+// spend the evening deleting each other's rows.
+
+{
+  const states = [
+    entity('light.kitchen_ceiling', 'on',
+      { friendly_name: 'Kitchen ceiling', area: 'Kitchen', brightness: 128,
+        supported_color_modes: ['brightness'] }),
+    entity('switch.kettle', 'off', { friendly_name: 'Kettle', area: 'Kitchen' }),
+  ];
+  const hub = await startHub({ states });
+
+  /** The add-on on the hub, checked in `secondsAgo` and mirroring. */
+  const onHub = (secondsAgo) => ({
+    owner: 'u1', relay: 'hub', host: 'hub', priority: 10, mirroring: true,
+    name: 'the flat', kind: 'home-assistant', devices: 2, reachable: true,
+    error: null, last_seen: new Date(Date.now() - secondsAgo * 1000).toISOString(),
+  });
+
+  const goneLamp = () => [{
+    owner: 'u1', entity_id: 'light.gone', name: 'Removed lamp', state: 'off',
+  }];
+
+  const tables = {
+    jobs: [{ id: 'a1', owner: 'u1', status: 'done' }],
+    // Left over from a hub that no longer has it. Only the leader gets to
+    // decide that a device is gone.
+    house_devices: goneLamp(),
+    house_hubs: [onHub(2)],
+    house_commands: [
+      { id: 1, owner: 'u1', entity_id: 'light.kitchen_ceiling', name: 'Kitchen ceiling',
+        action: 'off', value: null, source: 'dashboard', status: 'queued',
+        created_at: new Date().toISOString() },
+    ],
+  };
+  const { server, port } = await startTables(tables);
+
+  const runRelay = (extra = {}) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['bridge/house.mjs', '--once'], {
+      cwd: root,
+      env: bridgeEnv(port, null, {
+        HA_URL: `http://127.0.0.1:${hub.port}`,
+        HA_TOKEN: 'ha-token',
+        HA_NAME: 'the flat',
+        HOUSE_RELAY: 'desktop',
+        // The stand-in hub is on loopback, which is exactly how a relay
+        // works out that it is running *on* the hub. These runs are meant
+        // to be the one on a PC, so they say so.
+        HOUSE_RELAY_HOST: 'pc',
+        ...extra,
+      }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (code) => resolve({ out, code }));
+  });
+
+  // ── the PC, with the hub's own relay already mirroring ──
+  const standby = await runRelay();
+  ok('a second relay runs fine alongside the first', standby.code === 0, standby.out);
+  has('and says it is standing by rather than pretending to lead',
+    standby.out, 'standing by');
+
+  const rows = tables.house_hubs;
+  ok('each relay gets its own heartbeat row rather than overwriting one',
+    rows.length === 2 && rows.some((r) => r.relay === 'hub')
+      && rows.some((r) => r.relay === 'desktop'),
+    JSON.stringify(rows.map((r) => r.relay)));
+  const pc = rows.find((r) => r.relay === 'desktop');
+  ok('the PC says where it is, and that it is not the one mirroring',
+    pc.host === 'pc' && pc.priority === 0 && pc.mirroring === false && pc.reachable === true,
+    JSON.stringify(pc));
+  ok('and it left the hub relay row alone',
+    rows.find((r) => r.relay === 'hub').mirroring === true);
+
+  ok('a standby writes no devices of its own',
+    !tables.house_devices.some((d) => d.entity_id === 'switch.kettle'),
+    JSON.stringify(tables.house_devices.map((d) => d.entity_id)));
+  ok('and does not get to decide that a device is gone',
+    tables.house_devices.some((d) => d.entity_id === 'light.gone'),
+    JSON.stringify(tables.house_devices.map((d) => d.entity_id)));
+
+  // The one exception, and the reason it exists: your tap has to show up.
+  ok('a standby still obeys the tap that was queued',
+    tables.house_commands[0].status === 'done' && !tables.house_commands[0].error,
+    JSON.stringify(tables.house_commands[0]));
+  ok('and writes back the device it just changed, so the screen is not stale',
+    tables.house_devices.find((d) => d.entity_id === 'light.kitchen_ceiling')?.state === 'off',
+    JSON.stringify(tables.house_devices.map((d) => `${d.entity_id}:${d.state}`)));
+
+  // ── the hub's relay goes away ──
+  // A heartbeat older than FRESH_MS is a relay that is not there, so the PC
+  // takes the mirror over rather than leaving the screen frozen.
+  states[0].state = 'on';
+  tables.house_hubs = [onHub(600)];
+  tables.house_devices = goneLamp();
+  const promoted = await runRelay();
+  ok('a relay whose heartbeat went stale is stepped around', promoted.code === 0, promoted.out);
+  has('and the other one says it has taken the mirror', promoted.out, 'is mirroring the house');
+  ok('which means every device is written now',
+    tables.house_devices.some((d) => d.entity_id === 'switch.kettle')
+      && tables.house_devices.some((d) => d.entity_id === 'light.kitchen_ceiling'),
+    JSON.stringify(tables.house_devices.map((d) => d.entity_id)));
+  ok('and the device the hub no longer has is dropped',
+    !tables.house_devices.some((d) => d.entity_id === 'light.gone'),
+    JSON.stringify(tables.house_devices.map((d) => d.entity_id)));
+  ok('the heartbeat now says this relay is the one mirroring',
+    tables.house_hubs.find((r) => r.relay === 'desktop')?.mirroring === true,
+    JSON.stringify(tables.house_hubs.map((r) => `${r.relay}:${r.mirroring}`)));
+
+  // ── and a relay on the hub claims the mirror from a live PC ──
+  // Which way round this goes matters: the hub is the one that will still be
+  // there tomorrow, so it leads even when the PC got there first.
+  tables.house_hubs = [{
+    owner: 'u1', relay: 'desktop', host: 'pc', priority: 0, mirroring: true,
+    name: 'the flat', devices: 2, reachable: true, error: null,
+    last_seen: new Date().toISOString(),
+  }];
+  const addon = await runRelay({ HOUSE_RELAY: 'hub', HOUSE_RELAY_HOST: 'hub' });
+  has('a relay on the hub takes the mirror from a live PC', addon.out, 'is mirroring the house');
+  const hubRow = tables.house_hubs.find((r) => r.relay === 'hub');
+  ok('and is recorded as on the hub, outranking it',
+    hubRow?.host === 'hub' && hubRow?.priority === 10,
+    JSON.stringify(tables.house_hubs.map((r) => `${r.relay}:${r.host}:${r.priority}`)));
+
+  // ── loopback means "I am on the hub", with nothing to configure ──
+  const guessed = await runRelay({ HOUSE_RELAY: 'guessed', HOUSE_RELAY_HOST: '' });
+  const guessedRow = tables.house_hubs.find((r) => r.relay === 'guessed');
+  ok('a relay reaching its hub over loopback works that out for itself',
+    guessedRow?.host === 'hub', guessed.out);
+  ok('and gets the priority that goes with being there, unasked',
+    guessedRow?.priority === 10, JSON.stringify(guessedRow));
+
+  hub.server.close();
+  server.close();
+}
+
+// ── 9. the add-on that runs the relay on the hub ───────────────────────
+// A local Home Assistant add-on is built on the hub, where the build context
+// is the add-on's own folder — so the files the relay imports are copied in
+// first. One left behind would build fine and crash on the Pi, so the pack
+// is checked here instead of there.
+
+{
+  const { pack } = await import('../tools/pack-addon.mjs');
+  const to = join(tmpdir(), `addon-pack-${process.pid}`);
+  const { copied, missing } = await pack({ to, quiet: true });
+  ok('packing the add-on copies the relay and the vocabulary it shares',
+    copied.includes('house.js') && copied.includes('bridge/house.mjs'),
+    JSON.stringify(copied));
+  ok('and nothing any of them imports is left outside the copy',
+    missing.length === 0, JSON.stringify(missing));
+
+  const ran = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [join(to, 'bridge', 'house.mjs'), '--try'], {
+      // No hub to answer, so this fails — but it has to fail *at the hub*,
+      // which only happens if every import resolved first.
+      env: { ...process.env, HA_URL: 'http://127.0.0.1:1', HA_TOKEN: 'x', HA_TIMEOUT_MS: '900' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (code) => resolve({ out, code }));
+  });
+  has('and the packed copy runs on its own', ran.out, 'unreachable');
+  await rm(to, { recursive: true, force: true });
 }
 
 // ── report ────────────────────────────────────────────────────────────

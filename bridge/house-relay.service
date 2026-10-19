@@ -1,0 +1,46 @@
+# The house relay, as a systemd service on the hub.
+#
+# For a Pi running Raspberry Pi OS with Home Assistant in Docker, or a
+# container/core install — anywhere systemd is yours to use. On Home
+# Assistant OS, which does not hand out systemd, use bridge/addon instead.
+#
+# bridge/install-on-pi.sh puts this in /etc/systemd/system and fills in the
+# paths; it is here so you can read what it will install before you run it.
+
+[Unit]
+Description=claude-remote house relay (mirrors this hub to the dashboard)
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+# A hub that is still booting, or a router that is not up yet: this process
+# is meant to keep trying rather than give up after five goes in a row.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Everything secret is in this file, mode 600, root-owned: the Supabase
+# password and the hub's long-lived access token. Nothing is on the command
+# line, where `ps` would show it.
+EnvironmentFile=/etc/house-relay.env
+WorkingDirectory=/opt/house-relay
+ExecStart=/usr/bin/node /opt/house-relay/bridge/house.mjs
+Restart=always
+RestartSec=10
+
+User=house-relay
+Group=house-relay
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryMax=192M
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=house-relay
+
+[Install]
+WantedBy=multi-user.target

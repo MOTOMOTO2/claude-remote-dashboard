@@ -1185,6 +1185,84 @@ await tick();
 has('a relay that is up but a hub that is not says which', text('house-chips'), 'not answering');
 has('and home says the same thing in a sentence', houseViews.houseExplainer(), 'did not answer it');
 
+// ── a relay on the hub, which is the point of all this ──────────────
+// The whole reason for more than one relay row: the house has to be
+// reachable when you are out, and when you are out the desktop is asleep. A
+// relay on the hub is up regardless, so a dead PC next to a live Pi must
+// read as *online* rather than as a problem.
+
+fake.tables.house_hubs = [
+  { owner: 'u1', relay: 'desktop', host: 'pc', priority: 0, mirroring: false,
+    name: 'home assistant', kind: 'home-assistant', devices: 8,
+    reachable: true, error: null, last_seen: iso(90) },
+  { owner: 'u1', relay: 'hub', host: 'hub', priority: 10, mirroring: true,
+    name: 'home assistant', kind: 'home-assistant', devices: 8,
+    reachable: true, error: null, last_seen: new Date().toISOString() },
+];
+await houseStore.loadHouse();
+await tick();
+
+has('a live relay on the hub beats a PC that went to sleep an hour ago',
+  text('house-chips'), 'online');
+has('and the chips say where it is relayed from', text('house-chips'), 'on the hub');
+ok('presence names the relay actually carrying it',
+  houseStore.housePresence().relay === 'hub' && houseStore.housePresence().onHub === true,
+  JSON.stringify(houseStore.housePresence().relay));
+ok('and stops asking for a PC, because one is no longer needed',
+  houseStore.housePresence().needsPc === false);
+has('the note says nothing else has to be awake',
+  houseViews.houseExplainer(), 'on the hub itself');
+
+ok('both relays are listed', !el('house-relay-block').hidden);
+has('with how many are up', text('house-relay-count') + ' ' + text('house-relay-note'),
+  '2 1 of 2 up');
+has('the one doing the mirroring says so', text('house-relays'), 'mirroring');
+has('and the asleep one is asleep, not broken', text('house-relays'), 'asleep');
+ok('no nagging about the add-on once a relay is on the hub',
+  el('house-relay-hint').hidden);
+
+const onHubTaps = fake.inserts.length;
+const toastsWas = el('toasts').textContent;
+el('house-rooms').querySelector('[data-house-act]').click();
+await tick();
+ok('a tap goes straight out with the PC still asleep',
+  fake.inserts.length === onHubTaps + 1);
+const saidNow = el('toasts').textContent.replace(toastsWas, '');
+ok('and is not described as waiting for anything',
+  Boolean(saidNow) && !saidNow.includes('is back'), saidNow);
+
+// A relay that cannot see the hub is not the one to believe, even on the hub.
+fake.tables.house_hubs = [
+  { owner: 'u1', relay: 'hub', host: 'hub', priority: 10, mirroring: false,
+    name: 'home assistant', devices: 8, reachable: false,
+    error: 'supervisor/core unreachable', last_seen: new Date().toISOString() },
+  { owner: 'u1', relay: 'desktop', host: 'pc', priority: 0, mirroring: true,
+    name: 'home assistant', devices: 8, reachable: true, error: null,
+    last_seen: new Date().toISOString() },
+];
+await houseStore.loadHouse();
+await tick();
+has('one relay seeing the hub is enough, whichever it is', text('house-chips'), 'online');
+ok('and it is the one that can actually see it',
+  houseStore.housePresence().relay === 'desktop', houseStore.housePresence().relay);
+has('the add-on restarting is shown, not hidden', text('house-relays'), 'hub not answering');
+
+// ── only a PC, and it is asleep ───────────────────────────
+
+fake.tables.house_hubs = [
+  { owner: 'u1', relay: 'desktop', host: 'pc', priority: 0, mirroring: true,
+    name: 'home assistant', devices: 8, reachable: true, error: null, last_seen: iso(90) },
+];
+await houseStore.loadHouse();
+await tick();
+has('with nothing but a PC, it says so plainly', text('house-chips'), 'waiting for your PC');
+ok('and the relay list offers the fix rather than leaving you guessing',
+  !el('house-relay-hint').hidden
+  && el('house-relay-hint').textContent.includes('bridge/addon'),
+  el('house-relay-hint').textContent);
+has('the state note points at the same thing',
+  houseViews.houseExplainer(), 'bridge/addon');
+
 // ── a schema that predates the house ──────────────────────────────────
 
 fake.failTable('house_devices', 'relation "public.house_devices" does not exist');
@@ -1204,8 +1282,12 @@ fake.tables.house_hubs = [];
 await houseStore.loadHouse();
 await tick();
 ok('tables but no hub is the second step, not the first',
-  el('house-setup').textContent.includes('Point the relay at your hub'));
+  el('house-setup').textContent.includes('Put a relay next to your hub'));
 has('and names what to put in the .env', el('house-setup').textContent, 'HA_TOKEN');
+// The relay on the hub is what makes this work while you are out, so it is
+// offered before the one that needs the desktop awake.
+has('it offers the relay that does not need a PC awake',
+  el('house-setup').textContent, 'bridge/addon');
 
 el('house-setup').querySelector('[data-house-recheck]').click();
 await tick();

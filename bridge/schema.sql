@@ -143,15 +143,48 @@ create policy "own devices" on house_devices
 
 -- What is relaying, and whether the hub behind it answered. Two different
 -- failures — your PC asleep, or the Pi off — and the screen says which.
+--
+-- One row per *relay*, not per account, because the useful setup has two:
+-- one on the hub itself, which is on all the time, and one on your PC, which
+-- is not. `host` says which of those a row is, `priority` which to believe
+-- when both answer, and `mirroring` which one is currently writing devices.
 create table if not exists house_hubs (
-  owner     uuid primary key references auth.users on delete cascade,
+  owner     uuid not null references auth.users on delete cascade,
+  relay     text not null default 'pc',
+  host      text not null default 'pc' check (host in ('hub', 'pc')),
+  priority  int  not null default 0,
+  mirroring boolean not null default false,
   name      text not null,
   kind      text,
   devices   int  not null default 0,
   reachable boolean not null default false,
   error     text,
-  last_seen timestamptz not null default now()
+  last_seen timestamptz not null default now(),
+  primary key (owner, relay)
 );
+
+-- Already had this table from an earlier paste? These four lines bring it
+-- up to date, and the block after them widens the key from one relay per
+-- account to one row per relay. Both are safe to run again.
+alter table house_hubs add column if not exists relay     text not null default 'pc';
+alter table house_hubs add column if not exists host      text not null default 'pc';
+alter table house_hubs add column if not exists priority  int  not null default 0;
+alter table house_hubs add column if not exists mirroring boolean not null default false;
+
+do $$
+declare one_key text;
+begin
+  -- A primary key over a single column is the old shape: owner alone.
+  select c.conname into one_key
+    from pg_constraint c
+   where c.conrelid = 'house_hubs'::regclass
+     and c.contype = 'p'
+     and array_length(c.conkey, 1) = 1;
+  if one_key is not null then
+    execute format('alter table house_hubs drop constraint %I', one_key);
+    alter table house_hubs add primary key (owner, relay);
+  end if;
+end $$;
 
 alter table house_hubs enable row level security;
 

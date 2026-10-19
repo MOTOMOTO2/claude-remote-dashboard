@@ -1,16 +1,24 @@
 // Your house, as rows. The Raspberry Pi hub is on your LAN and your phone is
 // not, so this is the same relay the agents and the assistant already use:
-// the bridge on your PC talks to the hub locally, mirrors what it sees into
-// Supabase, and claims the commands you write from here.
+// something on your network talks to the hub locally, mirrors what it sees
+// into Supabase, and claims the commands you write from here.
 //
 // Pure — rows already in memory in, plain data out — so views.js only draws
 // it, bridge/ha.mjs maps it onto Home Assistant services, and the smoke test
 // can check all of it against fixed inputs.
 //
 // Two things can be down and they mean different things, so nothing here
-// ever collapses them: the *relay* is the bridge on your PC, the *hub* is
-// the Pi. "waiting for your PC" and "the hub did not answer" are different
-// problems with different fixes, and saying the wrong one wastes an evening.
+// ever collapses them: a *relay* is the process that carries the house out,
+// the *hub* is the Pi behind it. "waiting for your PC" and "the hub did not
+// answer" are different problems with different fixes, and saying the wrong
+// one wastes an evening.
+//
+// There can be more than one relay, which is the whole point of
+// bridge/addon: the hub is on all the time and your PC is not, so a relay
+// running on the hub itself is the one that makes this screen work when you
+// are out. These functions take every heartbeat and pick the relay actually
+// carrying the house, so an asleep PC alongside a live Pi reads as *online*
+// rather than as a problem.
 
 /** A hub heartbeat older than this and the relay is not there. Same as a host. */
 export const FRESH_MS = 30_000;
@@ -221,34 +229,127 @@ export function commandLabel({ action, value, name } = {}) {
   }
 }
 
-// ── the hub, and the relay in front of it ─────────────────────────────
+// ── the hub, and the relays in front of it ─────────────────
+
+/**
+ * Where a relay runs, which is really the question "what has to be awake for
+ * my house to be reachable?". A relay on the hub itself answers *nothing
+ * extra* — the hub is already on — and that is the difference between a
+ * house you can reach from the bus and one you can reach from the sofa.
+ */
+export const RELAY_HOSTS = {
+  hub: {
+    label: 'on the hub',
+    long: 'on the hub itself',
+    note: 'The hub is already on all the time, so nothing else has to be.',
+  },
+  pc: {
+    label: 'on your PC',
+    long: 'on your PC',
+    note: 'Reachable for as long as the PC is awake.',
+  },
+};
+
+export const relayHost = (row) => (row?.host === 'hub' ? 'hub' : 'pc');
+export const relayHostLabel = (host) => RELAY_HOSTS[host]?.label ?? RELAY_HOSTS.pc.label;
+
+const relayId = (row) => String(row?.relay ?? '').trim() || 'relay';
+
+/**
+ * Which relay to believe. A relay that can see the hub beats one that cannot,
+ * a relay on the hub beats one on a PC, and an explicit priority beats both —
+ * so a Pi and a desktop both relaying never flap between two answers.
+ */
+const rank = (r) => [
+  Number(r.reachable) || 0,
+  Number(r.priority ?? (relayHost(r) === 'hub' ? 10 : 0)) || 0,
+  relayHost(r) === 'hub' ? 1 : 0,
+];
+
+const better = (a, b) => {
+  const [x, y] = [rank(a), rank(b)];
+  for (let i = 0; i < x.length; i += 1) if (x[i] !== y[i]) return x[i] > y[i];
+  // Same on every count: the id, so two relays never disagree about which
+  // of them is the one being drawn.
+  return relayId(a) < relayId(b);
+};
+
+/**
+ * Every heartbeat, as something a screen can list: who it is, where it runs,
+ * whether it is alive, and whether the hub answered *it* — the live ones
+ * first, and the one carrying the house first of those.
+ */
+export function relays(hubs, now = Date.now()) {
+  const rows = (Array.isArray(hubs) ? hubs : [hubs]).filter(Boolean);
+  const list = rows.map((row) => {
+    const online = time(row.last_seen) > 0 && now - time(row.last_seen) < FRESH_MS;
+    return {
+      id: relayId(row),
+      name: row.name || 'your hub',
+      kind: row.kind || null,
+      host: relayHost(row),
+      where: relayHostLabel(relayHost(row)),
+      online,
+      // A dead relay tells you nothing about the hub, so it claims nothing.
+      reachable: online && row.reachable !== false,
+      mirroring: row.mirroring === true,
+      priority: Number(row.priority ?? (relayHost(row) === 'hub' ? 10 : 0)) || 0,
+      devices: Number(row.devices ?? 0) || 0,
+      lastSeen: row.last_seen ?? null,
+      error: row.error || null,
+    };
+  });
+
+  return list.sort((a, b) => (Number(b.online) - Number(a.online))
+    || (better(a, b) ? -1 : better(b, a) ? 1 : 0)
+    || a.id.localeCompare(b.id));
+}
 
 /**
  * Where the house actually is. Four shapes, because collapsing them is the
  * one thing that makes this screen useless:
  *
  *   never     nothing has ever checked in — the setup card
- *   relay-off the bridge on your PC is not running; commands will wait
- *   hub-off   the bridge is up but the Pi did not answer it
+ *   relay-off every relay is asleep; commands will wait
+ *   hub-off   a relay is up but the Pi did not answer it
  *   ok        both halves are there
+ *
+ * Takes one heartbeat row or all of them. With several, the best one is the
+ * answer — a PC that went to sleep hours ago must not make a live Pi look
+ * broken — and the rest ride along in `relays` for the screen to list.
  */
-export function hubPresence(hub, now = Date.now()) {
-  if (!hub) {
+export function hubPresence(hubs, now = Date.now()) {
+  const all = relays(hubs, now);
+  if (!all.length) {
     return {
       known: false, relayOnline: false, hubOnline: false,
       name: 'your hub', kind: null, devices: 0, lastSeen: null, error: null,
+      relays: [], relay: null, host: null, onHub: false, needsPc: false, online: 0,
     };
   }
-  const relayOnline = time(hub.last_seen) > 0 && now - time(hub.last_seen) < FRESH_MS;
+
+  // Alive and answering, else alive, else whatever last said anything.
+  const best = all.find((r) => r.reachable) ?? all.find((r) => r.online) ?? all[0];
+  const online = all.filter((r) => r.online).length;
+
   return {
     known: true,
-    relayOnline,
-    hubOnline: relayOnline && hub.reachable !== false,
-    name: hub.name || 'your hub',
-    kind: hub.kind || null,
-    devices: Number(hub.devices ?? 0) || 0,
-    lastSeen: hub.last_seen ?? null,
-    error: hub.error || null,
+    relayOnline: best.online,
+    hubOnline: best.reachable,
+    name: best.name,
+    kind: best.kind,
+    devices: best.devices || all.reduce((n, r) => Math.max(n, r.devices), 0),
+    // The freshest word from anything, so "last heard" is not a dead relay's.
+    lastSeen: all.reduce((latest, r) => (time(r.lastSeen) > time(latest) ? r.lastSeen : latest),
+      best.lastSeen),
+    error: best.error,
+    relays: all,
+    relay: best.id,
+    host: best.host,
+    onHub: best.host === 'hub',
+    /** No relay on the hub, so being reachable costs you a PC left awake. */
+    needsPc: all.every((r) => r.host !== 'hub'),
+    online,
   };
 }
 
@@ -257,27 +358,38 @@ export function hubState(who) {
     return {
       kind: 'never',
       label: 'no hub yet',
-      note: 'Nothing has checked in. Point the bridge on your PC at the hub and this '
-        + 'screen fills itself in.',
+      note: 'Nothing has checked in. Put a relay next to the hub — on the hub itself, '
+        + 'or on your PC — and this screen fills itself in.',
     };
   }
   if (!who.relayOnline) {
+    const asleep = who.needsPc
+      ? 'The relay on your PC is not running, so the house cannot be reached from here. '
+      : 'No relay is checking in, so the house cannot be reached from here. ';
     return {
       kind: 'relay-off',
-      label: 'waiting for your PC',
-      note: 'The relay on your PC is not running, so the house cannot be reached from '
-        + 'here. Anything you tap waits in the queue and runs when it is back.',
+      label: who.needsPc ? 'waiting for your PC' : 'no relay running',
+      note: `${asleep}Anything you tap waits in the queue and runs when one is back.`
+        + (who.needsPc
+          ? ' A relay on the hub itself would not need the PC at all — see bridge/addon.'
+          : ''),
     };
   }
   if (!who.hubOnline) {
     return {
       kind: 'hub-off',
       label: 'hub not answering',
-      note: `Your PC is up but ${who.name} did not answer it${who.error ? `: ${who.error}` : ''}. `
+      note: `The relay ${who.relays.find((r) => r.online)?.where ?? 'on your PC'} is up but `
+        + `${who.name} did not answer it${who.error ? `: ${who.error}` : ''}. `
         + 'Check the Pi is on and on the same network.',
     };
   }
-  return { kind: 'ok', label: 'online', note: `${who.name} is answering. Taps take effect now.` };
+  return {
+    kind: 'ok',
+    label: 'online',
+    note: `${who.name} is answering, relayed ${RELAY_HOSTS[who.host]?.long ?? 'on your PC'}. `
+      + `Taps take effect now. ${RELAY_HOSTS[who.host]?.note ?? ''}`.trim(),
+  };
 }
 
 // ── grouping and counting ─────────────────────────────────────────────

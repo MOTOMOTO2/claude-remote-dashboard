@@ -8,3 +8,4 @@ bridge/node_modules
 npm-debug.log
 *.png.tmp
 .DS_Store
+bridge/addon
