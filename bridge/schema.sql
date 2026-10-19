@@ -151,7 +151,10 @@ create policy "own devices" on house_devices
 create table if not exists house_hubs (
   owner     uuid not null references auth.users on delete cascade,
   relay     text not null default 'pc',
-  host      text not null default 'pc' check (host in ('hub', 'pc')),
+  -- 'hub' or 'pc'. Not a check constraint: a value this table has not heard
+  -- of should cost a relay a label on the screen, not its whole heartbeat,
+  -- and house.js already reads anything that is not 'hub' as 'pc'.
+  host      text not null default 'pc',
   priority  int  not null default 0,
   mirroring boolean not null default false,
   name      text not null,

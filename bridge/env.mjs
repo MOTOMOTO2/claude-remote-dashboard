@@ -7,6 +7,15 @@
 
 import { readFileSync } from 'node:fs';
 
+/**
+ * What `api` answers when the table is not in this Supabase project at all —
+ * as opposed to there and empty, or there and written to with
+ * `return=minimal`, both of which are ordinary and answer with nothing.
+ * Collapsing those into one value made a successful write look like a
+ * missing schema, which took the relay down on its first heartbeat.
+ */
+export const NO_TABLE = Symbol('no such table');
+
 /** A .env next to this file, if you would rather not export variables. */
 export function loadDotEnv(path = new URL('.env', import.meta.url)) {
   let text;
@@ -78,9 +87,11 @@ export function connect(env = process.env) {
       const text = await res.text();
       if (!res.ok) {
         // A table this account never made is "not set up", not a crash.
-        if (/PGRST205|does not exist/.test(text)) return null;
+        if (/PGRST205|does not exist/.test(text)) return NO_TABLE;
         throw new Error(`${method} ${path.split('?')[0]} → ${res.status} ${text.slice(0, 200)}`);
       }
+      // `return=minimal` is answered with no body at all, and that is a
+      // success. Only NO_TABLE means the schema is not there.
       return text ? JSON.parse(text) : null;
     },
 

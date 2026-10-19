@@ -47,14 +47,18 @@ and drives Claude Code lives on the PC, in its own repo.
   *waiting for your PC*. Not set up yet? `npm run bridge:setup` says exactly
   what is left, and the screen itself carries the SQL and the link to paste it
   into. See [Your own assistant](#your-own-assistant).
-- **Your house, from anywhere** — `#/house` is the smart home hub on your
-  Pi: every room, what is on, how warm it is, whether the door is locked, and
-  the tap that changes it. The hub is on your own network and this page is
-  not, so the same relay carries it — no port forwarded, and its token never
-  leaves your PC. A tap always says where it got to: *online*, *waiting for
-  your PC*, or *hub not answering*, which are three different problems. Your
-  assistant gets the same house as two tools, so "turn the kitchen light off"
-  works in `#/ask` too. See [Your house](#your-house).
+- **Your house, from anywhere — including with the PC off** — `#/house` is
+  the smart home hub on your Pi: every room, what is on, how warm it is,
+  whether the door is locked, and the tap that changes it. The hub is on your
+  own network and this page is not, so the same relay carries it — no port
+  forwarded, and its token never leaves that network. The relay runs **on the
+  hub itself**, which is already on all the time, so none of it waits for a
+  desktop to wake up; run one on the PC too and either will obey a tap. A tap
+  always says where it got to: *online*, *waiting for your PC*, or *hub not
+  answering*, which are three different problems. Your assistant gets the
+  same house as two tools, so "turn the kitchen light off" works in `#/ask`
+  too. See [Your house](#your-house) and
+  [Without your PC awake](#without-your-pc-awake).
 - **Several agents at once** — `#/agents` is the fleet: a card per agent with
   what it is doing this second and the tail of its own log, a ceiling you set
   (1–6) that your desktop claims against, and a queue where every job says what
@@ -386,17 +390,96 @@ your network and your phone does not.
 ```
 ┌──────────┐   tap a light   ┌──────────┐   claims it    ┌─────────────┐
 │ this app │ ──────────────▶ │ Supabase │ ◀───────────── │ house relay │
-│  (phone) │ ◀────────────── │          │ ─────────────▶ │   (your PC) │
+│  (phone) │ ◀────────────── │          │ ─────────────▶ │  on the hub │
 └──────────┘  every device    └──────────┘  what it saw   └──────┬──────┘
-                                                                 │ LAN only
+                                                                 │ loopback
                                                           ┌──────▼──────┐
                                                           │ the Pi hub  │
                                                           └─────────────┘
 ```
 
 Nothing listens for inbound connections. No port is forwarded, no tunnel is
-opened, and the hub's access token stays in `bridge/.env` on the PC — it is
-never in `config.js`, never in the browser, and never in this repo.
+opened, and the hub's access token stays on your own network — it is never
+in `config.js`, never in the browser, and never in this repo.
+
+### Without your PC awake
+
+The relay used to run only on the PC, and that was wrong in a way it took a
+while to notice: it worked everywhere except where the feature was *for*. A
+desktop is asleep exactly when you are out of the house and want the hall
+light, so the one screen whose whole purpose was "my house, from the bus"
+needed the one machine that is never on when you are on a bus.
+
+So the relay also runs **on the hub**, which is already on all the time —
+being on all the time is what a hub is. It is the same `bridge/house.mjs`,
+talking outward to Supabase exactly as it does on a PC, so there is still no
+port forwarded and still nothing listening for inbound connections. Two ways
+in, depending on how your Pi runs Home Assistant.
+
+**Home Assistant OS or Supervised** — the usual Pi install — gets
+[`bridge/addon`](bridge/addon), a local add-on:
+
+```sh
+npm run addon        # packs bridge/addon so the hub can build it
+```
+
+Then copy that folder into the hub's `addons` share as `house_relay`
+(`\\homeassistant\addons` on Windows, `smb://homeassistant/addons` on a Mac)
+and install it from **Settings → Add-ons → Add-on store → ⋮ → Check for
+updates**, under **Local add-ons**. Fill in the Supabase half on its
+Configuration tab and start it.
+
+That one reaches Home Assistant through the Supervisor, which means **there
+is no long-lived access token to make at all** — `homeassistant_api: true` in
+its `config.yaml` is the whole of its access to your house, and there is
+nothing to rotate.
+
+**Raspberry Pi OS with Home Assistant in Docker**, or anything else where
+systemd is yours to use, gets the service instead. On the Pi, from a clone of
+this repo:
+
+```sh
+sudo sh bridge/install-on-pi.sh
+```
+
+It copies four files to `/opt/house-relay`, makes a system user that owns
+nothing, writes `/etc/house-relay.env` (mode 600) for you to fill in, and
+enables [`bridge/house-relay.service`](bridge/house-relay.service). Nothing
+is installed — the relay has no dependencies on purpose.
+
+Either way, `#/house` then says **online** with your PC switched off, and the
+chip next to it says *on the hub* so you know which it is.
+
+### More than one relay
+
+Running a relay on the hub *and* on your PC is the intended setup, not a
+clash. Both check in, `#/house` lists both under **What is relaying** with
+what each one means, and either can claim a tap — so whichever is awake does
+the work.
+
+Only one of them mirrors devices, though, because two relays with different
+`HA_EXCLUDE` settings would otherwise spend the evening deleting each other's
+rows. The leader is picked in this order, and it is a total order with no
+ties, so two relays never both write and never both defer:
+
+1. **it can see the hub** — a relay that cannot is never the leader, which is
+   also the failover: the add-on restarting hands the mirror to the PC for a
+   minute rather than freezing the screen,
+2. **it is on the hub** — the machine that will still be there tomorrow,
+3. **`HOUSE_RELAY_PRIORITY`**, if you set one,
+4. its name, so the tie breaks the same way on both machines.
+
+A standby relay is not idle: it heartbeats, it obeys taps, and after obeying
+one it writes back the device it just changed — so a tap shows up straight
+away whichever relay took it. What it will not do is decide which devices
+exist.
+
+A relay works out which of the two it is without being told: you only reach a
+hub over loopback when you are standing on it, so
+`HA_URL=http://127.0.0.1:8123` means *on the hub* and
+`http://homeassistant.local:8123` means *on a PC*. `HOUSE_RELAY`,
+`HOUSE_RELAY_HOST` and `HOUSE_RELAY_PRIORITY` in `bridge/.env` override that
+guess if it ever does not fit.
 
 **The hub is assumed to be [Home Assistant](https://www.home-assistant.io/).**
 It is what a Raspberry Pi smart home hub usually is, and it was the
@@ -431,20 +514,27 @@ screen never collapses them into one word:
 | What it says | What is true | What a tap does |
 |---|---|---|
 | `no hub yet` | nothing has ever checked in | the setup card, not a lie |
-| `waiting for your PC` | the relay's heartbeat is over 30s old | queues, and runs when the PC is back |
-| `hub not answering` | the relay is up; the Pi did not answer it | queues, and the error says which |
+| `waiting for your PC` | every relay you have is on a PC, and its heartbeat is over 30s old | queues, and runs when the PC is back — and the screen says a relay on the hub would not need it |
+| `no relay running` | you have one on the hub too, and none of them is checking in | queues, and runs when one is back |
+| `hub not answering` | a relay is up; the Pi did not answer it | queues, and the error says which |
 | `online` | both halves are there | takes effect now |
 
-The heartbeat row carries both facts — `last_seen` for the relay, `reachable`
-and `error` for the hub — which is the only reason the table above can be
-honest. A tap that the hub refuses raises a toast and a notification rather
+Each relay's heartbeat row carries both facts — `last_seen` for the relay,
+`reachable` and `error` for the hub — which is the only reason the table above
+can be honest. With more than one relay the screen answers for the best of
+them: a desktop that went to sleep an hour ago must not make a Pi that is
+relaying right now look like a dead house. A tap that the hub refuses raises a toast and a notification rather
 than leaving the card looking like nothing happened, because a device that
 simply stays as it was is indistinguishable from a tap that never registered.
 
 ### Setting it up
 
 One paste of `bridge/schema.sql` (the same one the assistant needs — it
-covers both), then two lines in `bridge/.env`:
+covers both), and then a relay. On the hub is the one that keeps working
+while you are out, and it is [above](#without-your-pc-awake); the rest of
+this is the one on your PC, which is quicker to try.
+
+Two lines in `bridge/.env`:
 
 ```sh
 HA_URL=http://homeassistant.local:8123
@@ -464,6 +554,9 @@ npm run bridge        # the assistant and the house, one process
 (`bridge/run-at-logon.ps1`) covers the house with no changes. `npm run house`
 runs only the house, for a PC with no assistant on it.
 
+`npm run house:try` also says which relay this machine would be — on the hub
+or on a PC — and reminds you of the add-on if it is the latter.
+
 Optional, all in `bridge/.env`: `HA_NAME` (what the dashboard calls it —
 defaults to the hub's own location name), `HA_SENSORS=all` (keep every
 diagnostic sensor; by default only the readings a house screen is for are
@@ -473,11 +566,17 @@ entities), `HA_EXCLUDE` (a regex of entity ids to skip), `HA_POLL_MS`,
 
 ### What it writes
 
-Only what changed. The relay keeps a fingerprint per device and rewrites a
-row when the hub's answer for it differs, so an idle house costs no writes at
-all. A device unpaired from the hub is dropped rather than left on the
-dashboard for ever — including one unpaired while the relay was not running,
-because the first sync reads what the table already holds.
+Only what changed, and only by the leader. The relay keeps a fingerprint per
+device and rewrites a row when the hub's answer for it differs, so an idle
+house costs no writes at all. A device unpaired from the hub is dropped
+rather than left on the dashboard for ever — including one unpaired while the
+relay was not running, because the first sync reads what the table already
+holds.
+
+`house_hubs` is keyed `(owner, relay)` rather than per account, so two relays
+do not overwrite each other's heartbeats. If you set the house up before that
+was true, re-pasting `bridge/schema.sql` migrates the table in place — it is
+written to be safe to run again.
 
 ### Your assistant can open the door too
 
@@ -850,7 +949,11 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `tools/serve.mjs` | The static server — in development and in the container |
 | `bridge/bridge.mjs` | The PC half: claims what you asked, streams the answer back |
 | `bridge/reply.mjs` | The two adapters, and every guess about a response shape |
-| `bridge/house.mjs` | The house relay: mirrors the hub, claims your taps. Runs alone or inside the bridge |
+| `bridge/house.mjs` | The house relay: mirrors the hub, claims your taps, and works out whether it is the one on the hub. Runs alone, inside the bridge, or on the Pi |
+| `bridge/addon/` | The same relay as a Home Assistant add-on, so the hub carries the house itself — no token, no PC |
+| `bridge/install-on-pi.sh` | Installs it as a systemd service instead, for a Pi without the add-on store |
+| `bridge/house-relay.service` | The unit that script writes, here so you can read it first |
+| `tools/pack-addon.mjs` | Copies the relay into `bridge/addon` so the hub can build it (`npm run addon`) |
 | `bridge/ha.mjs` | The only file that knows the hub is Home Assistant |
 | `bridge/env.mjs` | The `.env` loader and the Supabase client every script here shares |
 | `bridge/setup.mjs` | Says which of the four setup steps are done, and does the two it can |
@@ -877,9 +980,14 @@ the signed-in user:
 | `chats` | `id, owner, title, created_at, updated_at` — optional; see [Your own assistant](#your-own-assistant) |
 | `chat_messages` | `id, chat_id, owner, role, text, status, error, cancel_requested, created_at` |
 | `assistants` | `owner, name, model, last_seen` |
+| `house_devices` | `owner, entity_id, name, area, kind, state, is_on, attrs, updated_at` — optional; see [Your house](#your-house) |
+| `house_hubs` | `owner, relay, host, priority, mirroring, name, kind, devices, reachable, error, last_seen` — one row per relay, keyed `(owner, relay)` |
+| `house_commands` | `id, owner, entity_id, name, action, value, source, status, error, created_at` |
 
 A job's `status` is `queued`, `running`, `paused`, `done` or `error`. A desktop
-counts as online if its `last_seen` is under 30 seconds old.
+counts as online if its `last_seen` is under 30 seconds old, and so does a
+relay — which is why a PC asleep for an hour reads as asleep rather than as a
+house that has stopped answering.
 
 ## Notes on the design
 
