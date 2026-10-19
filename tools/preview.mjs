@@ -15,7 +15,7 @@ const [view = 'home', theme = 'light'] = process.argv.slice(2);
 const HASH = {
   home: '#/', agents: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
   ideas: '#/ideas', projects: '#/projects',
-  auth: '#/', empty: '#/',
+  auth: '#/', empty: '#/', setup: '#/ask',
 };
 if (!(view in HASH)) {
   console.error(`unknown view "${view}" — pick one of ${Object.keys(HASH).join(', ')}`);
@@ -25,6 +25,12 @@ if (!(view in HASH)) {
 seed();
 if (view === 'empty') {
   for (const table of Object.keys(fake.tables)) fake.tables[table] = [];
+}
+// An account whose schema predates the assistant: the screen that has to
+// talk you through setting it up rather than just naming a file.
+if (view === 'setup') {
+  fake.failTable('chats', 'relation "public.chats" does not exist');
+  fake.tables.assistants = [];
 }
 // A reply arriving is the state worth looking at on the assistant screen.
 if (view === 'ask') {
