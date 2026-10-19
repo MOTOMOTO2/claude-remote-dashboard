@@ -26,6 +26,8 @@ const TYPES = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  // The app fetches bridge/schema.sql when it has to talk you through setup.
+  '.sql': 'text/plain; charset=utf-8',
 };
 
 createServer(async (req, res) => {

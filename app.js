@@ -428,8 +428,11 @@ document.addEventListener('click', async (e) => {
     btn.disabled = true;
     try {
       const res = await fetch('bridge/schema.sql');
-      if (!res.ok) throw new Error(String(res.status));
-      await copy(await res.text(), 'SQL copied — paste it into the editor');
+      const sql = res.ok ? await res.text() : '';
+      // Offline, the service worker answers any miss with the app shell. A
+      // page of HTML on the clipboard labelled "SQL" is worse than a no.
+      if (!/create table/i.test(sql)) throw new Error('not the migration');
+      await copy(sql, 'SQL copied — paste it into the editor');
     } catch {
       toast('Could not read bridge/schema.sql — open it from the repo', { bad: true });
     }

@@ -39,7 +39,9 @@ Code lives on the PC, in its own repo.
   exactly as long as the PC is on, through the same relay the agents use —
   no port open, no tunnel, nothing sent to anyone else's model. A reply
   always says where it is: *typing…*, *waiting its turn · 2 ahead*, or
-  *waiting for your PC*. See [Your own assistant](#your-own-assistant).
+  *waiting for your PC*. Not set up yet? `npm run bridge:setup` says exactly
+  what is left, and the screen itself carries the SQL and the link to paste it
+  into. See [Your own assistant](#your-own-assistant).
 - **Several agents at once** — `#/agents` is the fleet: a card per agent with
   what it is doing this second and the tail of its own log, a ceiling you set
   (1–6) that your desktop claims against, and a queue where every job says what
@@ -97,6 +99,11 @@ cp config.example.js config.js     # then fill in your Supabase URL + anon key
 npm install                        # only needed for the tests
 npm run serve                      # → http://localhost:5173
 ```
+
+Two more worth knowing: `npm run bridge:setup` walks you through making your
+own assistant reachable ([below](#setting-it-up)), and `npm run mobile`
+measures the phone layout in a real browser
+([below](#measuring-it-instead-of-squinting-at-it)).
 
 It must be served over http:// — ES modules and the service worker don't work
 from `file://`. Any static host will do: GitHub Pages, Netlify, Cloudflare
@@ -213,15 +220,51 @@ than dropped, because losing the answer is worse than printing a stray brace.
 ### Setting it up
 
 ```sh
-# 1. the tables — paste bridge/schema.sql into the Supabase SQL editor once
-# 2. the configuration
-cp bridge/.env.example bridge/.env     # then fill it in
+npm run bridge:setup
+```
 
-# 3. prove your assistant answers, without Supabase in the way
-node bridge/bridge.mjs --try "hello"
+One command that says where you are. Four things have to be true before
+`#/ask` works, and it checks all four, does the two it can do on its own, and
+prints the exact next command for the rest:
 
-# 4. leave it running
-node bridge/bridge.mjs
+| | | |
+|---|---|---|
+| 1 | the relay | read out of `config.js` — you already filled that in |
+| 2 | the tables | `bridge/schema.sql`, pasted into the SQL editor once |
+| 3 | `bridge/.env` | **written for you**, with the Supabase project already in it |
+| 4 | your assistant | `ASSISTANT_CMD` or `ASSISTANT_URL` — and it is asked, to be sure |
+
+It never writes to Supabase, and it never overwrites a `.env` you already
+have — the bottom half of that file is a password. For step 2 it prints the
+SQL editor URL for *your* project, derived from the one in `config.js`. For
+step 4, if nothing is configured yet, it knocks on the ports a local
+assistant usually answers on (Ollama, LM Studio, llama.cpp and friends) and
+offers the line to paste for each one that answers. Run it again after each
+change; it exits non-zero while anything is outstanding.
+
+**From the phone instead.** The Assistant screen says the same thing, with
+the buttons to act on it: *copy the SQL*, *open the SQL editor*, and *check
+again*. So the migration can be run from the laptop and confirmed from the
+device that was complaining, without a reload.
+
+**Where this checkout stands.** `bridge/.env` is written and holds the
+Supabase project from `config.js` and the account to sign in as. Two things
+are deliberately left, because neither can be done from inside this repo:
+
+1. **`SUPABASE_PASSWORD=`** in `bridge/.env` — the one secret. Nothing else
+   is missing from that file.
+2. **The tables.** `chats`, `chat_messages`, `assistants` and `settings` are
+   all absent from the project right now; adding them needs the SQL editor,
+   which needs your login. Step 2 above is the whole of it.
+
+`ASSISTANT_CMD` currently points at `bridge/example-assistant.mjs`, the
+stand-in — so the moment those two are done, `#/ask` works end to end and
+proves the relay. Pointing it at the assistant you actually built is then one
+line, and `npm run bridge:setup` will tell you it answered.
+
+```sh
+node bridge/bridge.mjs --try "hello"    # the adapter, with no Supabase in the way
+node bridge/bridge.mjs                  # leave it running
 ```
 
 `--try` runs the adapter and nothing else: it prints the reply as it streams
@@ -253,19 +296,20 @@ instead — it bypasses RLS, so keep it on that one machine.
 
 ### The tables it wants
 
-`bridge/schema.sql` adds three, and changes nothing that is already there:
+`bridge/schema.sql` adds four, and changes nothing that is already there:
 
 | Table | What is in it |
 |---|---|
 | `chats` | one row per conversation: `id, owner, title, created_at, updated_at` |
 | `chat_messages` | one row per turn: `chat_id, role, text, status, error, cancel_requested` |
 | `assistants` | the bridge's heartbeat: `owner, name, model, last_seen` |
+| `settings` | the agent ceiling: `owner, max_parallel` — not the assistant's, but the other table the dashboard asks for and keeps working without, so that one paste brings an account all the way up to date |
 
 A message's `status` is `queued`, `streaming`, `done` or `error`. An
 assistant counts as online if `last_seen` is under 30 seconds old — the same
 rule the desktop runner gets.
 
-All three are optional. An account whose schema predates this keeps working;
+All four are optional. An account whose schema predates this keeps working;
 the Assistant screen says which migration has not run rather than throwing,
 exactly like the agent ceiling.
 
@@ -338,6 +382,54 @@ way between screens. What changed:
 
 Nothing was dropped to make room. A wide screen still opens with all of it, as
 the two-column dashboard it was; everything else is one tap away.
+
+### Measuring it, instead of squinting at it
+
+Dense is one decision away from *cut off*, and the smoke test cannot tell the
+difference: jsdom has no layout engine, so a box clipped to a third of its
+text looks exactly like one that fits.
+
+```sh
+npm run mobile              # every view at 390px
+npm run mobile home 320     # one view, one width
+```
+
+`tools/mobile-audit.mjs` renders each screen with the preview tool, re-opens
+the frozen file in headless Chrome with a probe appended, and reports:
+
+| It looks for | Because |
+|---|---|
+| content wider than its own box | a sentence ellipsised down to a fragment |
+| boxes past the viewport edge | the right-hand column of a card, gone |
+| the page scrolling sideways at all | one wide child is enough to do it |
+| content left under the bottom bar | the last row you can never reach |
+| tap targets under 40px | counting any hit area grown with `::after`, so a dense control that is still catchable is not a finding |
+| controls whose own middle belongs to something else | the fix for the line above, overdone |
+
+It finds the browser itself — Playwright's Chromium, Chrome, or Edge,
+whichever is installed — or takes `CHROME=`. There is no new dependency.
+
+What it caught, and what changed in answer:
+
+- **Suggestions were losing most of their sentence.** `last run failed — npm
+  install failed: ETARGET no matching version for vite@99` was one ellipsised
+  line: 161 of its 232 pixels hidden at 390px, 231 of 393 at 320px. Titles and
+  reasons now clamp to two lines rather than one — still bounded, so a long
+  one cannot push a card around.
+- **Headings were squeezing into the column their own buttons left over.** On
+  a phone the chat and assistant titles take the line, and the actions wrap
+  under them.
+- **The topbar was spending 150px of 390 on two pills**, which left a project
+  name ellipsising itself. Under 440px the desktop badge is its dot — the name
+  stays in `aria-label`, `title`, and the toast tapping it already raised.
+- **The bottom tabs sagged in the middle**: New's bigger icon pushed its own
+  label 5px below the five beside it. The tabs share one fixed icon row now.
+- **The smallest controls grew a hit area, not padding.** A 19px-tall link is
+  a thumb's worth of guessing, but a 44px chip is a different app. They keep
+  the size they look and stretch an invisible `::after` instead, so the screens
+  stay as dense as they were.
+
+Every view is clean at 390px and 320px.
 
 ## Where suggestions come from
 
@@ -459,7 +551,9 @@ leading with the tightest window, tabs and composer never sharing the bottom of
 the window), the assistant screen (an answered thread, sending a message, the answer
 streaming in and finishing, a PC that is switched off, a reply queued behind
 another, an answer that failed, a bridge that has never checked in, a schema
-that predates the feature, handing an answer to an agent, deleting a
+that predates the feature — and the setup card offering the SQL, the editor for
+the configured project, and a re-check that keeps the card up while the tables
+are still missing — handing an answer to an agent, deleting a
 conversation), the ideas view and its filters, the projects view with its
 search, filters and sort, re-reading and failing to read the limits, clearing
 a chat, the drawer, keyboard shortcuts, theming, and the Markdown renderer. It also checks the static invariants a
@@ -520,16 +614,22 @@ npm run preview -- home dark
 Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
 Supabase project at all. Views: `home`, `agents`, `ask`, `chat`, `new`,
-`ideas`, `projects`, `auth`, `empty`. Themes: `light`, `dark`, `mobile`. (`preview/` is gitignored.)
+`ideas`, `projects`, `auth`, `empty`, and `setup` — the assistant screen as an
+account that has not run the migration sees it. Themes: `light`, `dark`,
+`mobile`. (`preview/` is gitignored.)
 
 To screenshot one headlessly:
 
 ```sh
-chrome --headless --hide-scrollbars --force-device-scale-factor=2   --window-size=500,900 --screenshot=home.png preview/home-light.html
+chrome-headless-shell --headless --hide-scrollbars --force-device-scale-factor=2 \
+  --window-size=390,844 --screenshot=home.png preview/home-mobile.html
 ```
 
-Chrome will not open a window narrower than ~500px, so for a true phone width
-point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
+`chrome-headless-shell` — Playwright ships one, under
+`~/AppData/Local/ms-playwright/chromium_headless_shell-*/` on Windows — does
+honour a window narrower than 500px, where a full Chrome build clamps it. Use
+`--dump-dom` with a `<script>` appended to the frozen file to measure the page
+instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 
 ## The files
 
@@ -554,10 +654,12 @@ point it at a wrapper page holding `<iframe src="home-light.html" width="390">`.
 | `tools/contrast.mjs` | Asserts the colour claims against `style.css` |
 | `tools/icon.mjs` | Redraws `icon.png` from the brand geometry |
 | `tools/preview.mjs` | Freezes one screen to static HTML for a look |
+| `tools/mobile-audit.mjs` | Measures the narrow layout in a real browser: what is cut off, what is unreachable |
 | `tools/serve.mjs` | The static server — in development and in the container |
 | `bridge/bridge.mjs` | The PC half: claims what you asked, streams the answer back |
 | `bridge/reply.mjs` | The two adapters, and every guess about a response shape |
-| `bridge/schema.sql` | The three tables a conversation needs |
+| `bridge/setup.mjs` | Says which of the four setup steps are done, and does the two it can |
+| `bridge/schema.sql` | The four tables this account needs, in one paste |
 | `bridge/example-assistant.mjs` | A stand-in assistant, and the shape to copy |
 | `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
 | `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
@@ -658,6 +760,31 @@ counts as online if its `last_seen` is under 30 seconds old.
   reach for with a phone in your hand, and burying it behind a slide-out
   would have made "always accessible" quietly untrue. The labels elide and
   shrink below 390px rather than anything being dropped.
+- **`bridge/setup.mjs` does not run the SQL.** It could ask for a service-role
+  key or a database password and do the migration itself. That would mean one
+  more credential on disk, with permission to drop tables, to save one paste —
+  so instead it finds out which tables are missing with the publishable key
+  that is already in `config.js` (a table that is not there answers
+  `PGRST205`; one that is answers `[]`, because row-level security hides your
+  rows from an unauthenticated read), prints the editor URL for your project,
+  and checks again when you ask it to.
+- **The setup card is on the screen that is complaining.** Telling someone
+  holding a phone to go and find a file in a repo is a dead end, so the
+  Assistant screen carries the SQL, the link to the editor, and the re-check.
+  The SQL is fetched from `bridge/schema.sql` rather than copied into a
+  JavaScript string, so there is one of it; `.dockerignore` keeps `bridge/`
+  in the image for that reason and excludes only `bridge/.env`.
+- **Two lines, not one or unbounded.** A suggestion's reason could wrap
+  freely. Clamping it at two keeps a pathological summary from turning a row
+  into a paragraph and shoving the next card off the screen, while leaving
+  room for every real one in the fixtures. The number is a guess that the
+  audit can check, not a principle.
+- **Hit areas grew; the controls did not.** The honest fix for a 19px-tall
+  link is a 44px-tall link, and this is a dashboard that was asked to be
+  dense. So the small controls keep the size they look and stretch an
+  invisible `::after` past their own edges — and because that trick can
+  silently swallow a neighbour's taps, the audit also checks that the middle
+  of every control still belongs to it.
 - **Tabs on a phone, a drawer on a desktop.** The drawer still holds the
   project list, the search and the account controls, but navigating with it
   meant two taps and a slide for every screen. The tabs cost a strip at the

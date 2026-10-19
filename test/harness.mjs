@@ -163,8 +163,11 @@ export function makeWindow({ width = 1200, dark = false, html = file('index.html
 
   window.CONFIG = { supabaseUrl: 'https://proj-ref.supabase.co', supabaseAnonKey: 'anon' };
   window.confirm = () => true;
+  // Remembered, so a test can check *what* was copied and not just that
+  // something was.
+  window.copied = [];
   Object.defineProperty(window.navigator, 'clipboard', {
-    value: { writeText: async () => {} }, configurable: true,
+    value: { writeText: async (text) => { window.copied.push(text); } }, configurable: true,
   });
 
   return { dom, window, screen };
