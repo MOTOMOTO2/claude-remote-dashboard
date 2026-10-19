@@ -41,7 +41,7 @@
 
 import { hostname } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { loadDotEnv, connect } from './env.mjs';
+import { loadDotEnv, connect, NO_TABLE } from './env.mjs';
 import * as ha from './ha.mjs';
 import { commandLabel, isAction, FRESH_MS } from '../house.js';
 
@@ -143,8 +143,7 @@ export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
         last_seen: stamp(),
       },
     }).catch((e) => { log(`hub heartbeat failed: ${e.message}`); return undefined; });
-    // A null body is PostgREST saying the table is not there.
-    if (row === null) notSetUp();
+    if (row === NO_TABLE) notSetUp();
   };
 
   /**
@@ -161,9 +160,9 @@ export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
     if (missing) return true;
     const rows = await api(`/house_hubs?owner=eq.${owner}&select=relay,host,priority,reachable,last_seen`)
       .catch((e) => { log(`could not read the other relays: ${e.message}`); return undefined; });
-    if (rows === null) { notSetUp(); return true; }
+    if (rows === NO_TABLE) { notSetUp(); return true; }
     // Could not ask: mirror anyway. A stale screen is worse than two writers.
-    if (rows === undefined) return true;
+    if (!Array.isArray(rows)) return true;
 
     const now = Date.now();
     return !rows.some((r) => r.relay !== me.relay
@@ -196,7 +195,7 @@ export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
     if (primed) return;
     primed = true;
     const rows = await api('/house_devices?select=entity_id').catch(() => undefined);
-    if (rows === null) { notSetUp(); return; }
+    if (rows === NO_TABLE) { notSetUp(); return; }
     for (const r of rows ?? []) known.add(r.entity_id);
   }
 
@@ -208,7 +207,7 @@ export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
       prefer: 'resolution=merge-duplicates,return=minimal',
       body: list.map((d) => ({ ...d, owner, updated_at: stamp() })),
     }).catch((e) => { log(`could not write ${list.length} devices: ${e.message}`); return undefined; });
-    if (written === null) { notSetUp(); return false; }
+    if (written === NO_TABLE) { notSetUp(); return false; }
     if (written === undefined) return false;
     for (const d of list) seen.set(d.entity_id, fingerprint(d));
     return true;
@@ -267,7 +266,7 @@ export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
   async function claim() {
     if (missing) return null;
     const queued = await api('/house_commands?status=eq.queued&order=created_at.asc&limit=1');
-    if (queued === null) { notSetUp(); return null; }
+    if (queued === NO_TABLE) { notSetUp(); return null; }
     const next = queued?.[0];
     if (!next) return null;
 

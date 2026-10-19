@@ -299,7 +299,18 @@ function startTables(tables) {
       req.on('end', () => resolve(text ? JSON.parse(text) : null));
     });
     requests.push({ method: req.method, path: url.pathname + url.search, body });
+    // PostgREST answers `Prefer: return=minimal` with 201 and *no body*, so
+    // this does too — a successful write that looks like a missing table is
+    // exactly the mistake a forgiving stand-in would hide.
+    const minimal = /return=minimal/.test(req.headers.prefer ?? '');
     const send = (data, code = 200) => {
+      // Only on success: an error still carries its body, which is how a
+      // missing table says PGRST205.
+      if (minimal && req.method !== 'GET' && code < 300) {
+        res.writeHead(201, { 'content-type': 'application/json' });
+        res.end('');
+        return;
+      }
       res.writeHead(code, { 'content-type': 'application/json' });
       res.end(JSON.stringify(data));
     };
@@ -564,6 +575,11 @@ const entity = (id, state, attributes = {}) => ({ entity_id: id, state, attribut
     tables.house_hubs[0]?.reachable === true && tables.house_hubs[0]?.name === 'the flat'
       && tables.house_hubs[0]?.owner === 'u1',
     JSON.stringify(tables.house_hubs[0]));
+  // PostgREST answers a `return=minimal` write with no body at all. Reading
+  // that as "the table is not there" stopped the relay dead on its first
+  // heartbeat, and every symptom of it was silence.
+  ok('a write that answers with no body is not mistaken for a missing schema',
+    !/not in your Supabase project/i.test(relay.out), relay.out);
 
   const off = hub.calls.find((c) => c.service === 'turn_off');
   ok('a queued tap becomes the Home Assistant call it means',
