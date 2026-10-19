@@ -267,6 +267,109 @@ const readLog = () => { try { return readFileSync(logAt, 'utf8'); } catch { retu
   server.close();
 }
 
+// ── 6. the dashboard, as tools ────────────────────────────────────────
+// bridge/tools.mjs is what your own assistant calls to see jobs and usage
+// and to queue work. It gets a fake of its own: plain tables, `eq` filters,
+// and a missing table answering the way PostgREST does.
+
+function startTables(tables) {
+  const requests = [];
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://x');
+    const body = await new Promise((resolve) => {
+      let text = '';
+      req.on('data', (d) => { text += d; });
+      req.on('end', () => resolve(text ? JSON.parse(text) : null));
+    });
+    requests.push({ method: req.method, path: url.pathname + url.search, body });
+    const send = (data, code = 200) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
+    if (url.pathname === '/auth/v1/token') { send({ access_token: 'tok', user: { id: 'u1' } }); return; }
+    const table = url.pathname.replace('/rest/v1/', '');
+    if (!tables[table]) { send({ code: 'PGRST205', message: `no table ${table}` }, 404); return; }
+    if (req.method === 'POST') {
+      const row = { id: `job-${tables[table].length + 1}`, status: 'queued', created_at: new Date().toISOString(), ...body };
+      tables[table].push(row);
+      send([row]);
+      return;
+    }
+    const where = [...url.searchParams]
+      .filter(([k]) => !['select', 'order', 'limit'].includes(k))
+      .map(([k, v]) => [k, v.replace(/^eq\./, '')]);
+    const limit = Number(url.searchParams.get('limit') ?? 1000);
+    send(tables[table].filter((r) => where.every(([k, v]) => String(r[k] ?? '') === v)).slice(0, limit));
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ requests, server, port: server.address().port }));
+  });
+}
+
+async function tool(port, args, input = '') {
+  const child = spawn(process.execPath, ['bridge/tools.mjs', ...args], {
+    cwd: root, env: bridgeEnv(port), stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let out = '';
+  let err = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { err += d; });
+  child.stdin.end(input);
+  const code = await new Promise((r) => child.on('close', r));
+  return { out, err, code };
+}
+
+{
+  const minutesAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+  const tables = {
+    jobs: [
+      { id: 'a1', prompt: 'add dark mode', project_slug: 'hub', status: 'running', created_at: minutesAgo(3) },
+      { id: 'b2', prompt: 'fix the login', project_slug: 'portfolio', status: 'error', error: 'npm install failed: ETARGET', created_at: minutesAgo(60) },
+    ],
+    job_events: [{ id: 1, job_id: 'b2', kind: 'tool', text: 'ran npm install' }],
+    usage_windows: [{ window_type: 'five_hour', pct: 42.4, resets_at: new Date(Date.now() + 2 * 3600_000).toISOString() }],
+    hosts: [{ name: 'desktop', last_seen: new Date().toISOString() }],
+    projects: [{ name: 'hub', description: 'A home hub', language: 'TypeScript' }, { name: 'portfolio' }],
+  };
+  const { requests, server, port } = await startTables(tables);
+
+  const listed = JSON.parse((await tool(port, ['list'])).out);
+  ok('the provider lists its four tools', listed.length === 4, JSON.stringify(listed.map((t) => t.name)));
+  ok('only queue_job says it acts', listed.filter((t) => t.acts).map((t) => t.name).join() === 'queue_job');
+
+  const status = await tool(port, ['call', 'dashboard_status'], '{}');
+  has('the status says whether the PC runner is up', status.out, 'PC runner: online (desktop');
+  has('and what is running', status.out, 'Running (1):');
+  has('and why the last failure failed', status.out, 'FAILED: npm install failed: ETARGET');
+  has('with the latest failure named outright', status.out, 'Latest failure: - [b2] portfolio');
+  has('and where usage stands', status.out, 'five_hour 42%');
+  ok('it signed in as you rather than using a service key',
+    requests.some((r) => r.path.startsWith('/auth/v1/token')));
+
+  const details = await tool(port, ['call', 'job_details'], '{"job":"portfolio"}');
+  has('a project name finds its latest job', details.out, '[b2] portfolio — error');
+  has('with what it did', details.out, 'tool: ran npm install');
+
+  const queued = await tool(port, ['call', 'queue_job'], '{"prompt":"add a contact form to the hub","project":"HUB"}');
+  const row = tables.jobs.at(-1);
+  ok('queue_job writes the same row the New screen does',
+    row.owner === 'u1' && row.mode === 'existing' && row.project_slug === 'hub'
+      && row.repo_visibility === 'none' && row.effort === 'high' && row.usage_cap_pct === 90,
+    JSON.stringify(row));
+  has('and says what it queued', queued.out, 'Queued job [job-3] on hub');
+
+  const before = tables.jobs.length;
+  const unknown = await tool(port, ['call', 'queue_job'], '{"prompt":"add a contact form","project":"hu"}');
+  ok('a project that does not exist queues nothing', tables.jobs.length === before && unknown.code === 1);
+  has('and suggests the near ones', unknown.err, 'Did you mean: hub');
+
+  delete tables.projects;
+  const none = await tool(port, ['call', 'list_projects'], '{}');
+  ok('a table this account never made is "none yet", not a crash', none.code === 0, none.err);
+  has('and says so', none.out, 'no projects listed yet');
+  server.close();
+}
+
 // ── report ────────────────────────────────────────────────────────────
 
 console.log(`\n  ${pass} bridge checks passed`);

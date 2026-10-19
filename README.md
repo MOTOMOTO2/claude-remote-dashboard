@@ -217,6 +217,40 @@ back to `reply` / `text` / `answer` / `output` / `response` for an endpoint
 you wrote yourself. A line it cannot parse is passed through as prose rather
 than dropped, because losing the answer is worse than printing a stray brace.
 
+### What answers on this PC: personal-code-assistant, with the dashboard as tools
+
+The assistant wired in here is
+[personal-code-assistant](https://github.com/MOTOMOTO2/personal-code-assistant)
+(`pca answer`), running an open model on this PC's GPU through Ollama. No cloud
+model is involved. It can read your projects and search the web on its own; the dashboard
+gives it the rest through `bridge/tools.mjs`, which it runs as its
+`PCA_TOOLS`:
+
+| Tool | What it does |
+|---|---|
+| `dashboard_status` | Whether the PC runner is up; jobs running, paused and queued; the latest failure and why; usage windows |
+| `job_details` | One job — by id, or a project's latest — with the last things it did |
+| `list_projects` | The `projects` table: what each one is, and where it is live |
+| `queue_job` | Starts a job, writing the same row the New screen does (effort high, cap 90%, a new repo private). The only tool that acts |
+
+`tools.mjs` signs in the way the bridge does — the same `.env`, as you, under
+row-level security — so your assistant can see and do what you can and no
+more. `node bridge/tools.mjs list` prints the tools; `node bridge/tools.mjs
+call dashboard_status` runs one. The lines in `bridge/.env` that wire it up:
+
+```sh
+ASSISTANT_CMD=node "<where it lives>\personal-code-assistant\dist\cli.js" answer
+ASSISTANT_MODEL=qwen3:8b
+PCA_TOOLS=node "<this repo>\bridge\tools.mjs"
+PCA_PROJECTS_ROOT=<the folder your projects are in>
+PCA_OWNER=<your name>              # who it works for
+```
+
+The bridge starts pca afresh for every message, so rebuilding pca
+(`npm run build` there) changes the next answer without restarting anything.
+A game that fills the GPU makes the first answer after it slow, because the
+model loads around it.
+
 ### Setting it up
 
 ```sh
@@ -608,7 +642,10 @@ with "(stopped)" rather than as a failure; an assistant that exits non-zero
 leaves the reply in `error` with its own stderr in it; and with nothing
 queued the bridge still checks in before it stops. It runs `keep-up.mjs` the
 same way: a bridge that stops is started again, its output lands in the log,
-and killing the keeper takes the bridge with it. Deleting the status filter
+and killing the keeper takes the bridge with it. And `tools.mjs`, against a
+fake with plain tables: the status names the latest failure and why,
+`queue_job` writes the New screen's row and refuses a project that does not
+exist, and a table the account never made reads as "none yet". Deleting the status filter
 from the claim fails that suite, which is the point of writing it.
 
 The Supabase CDN import is swapped for a local fake by a Node module loader
@@ -673,6 +710,7 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `bridge/example-assistant.mjs` | A stand-in assistant, and the shape to copy |
 | `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
 | `bridge/keep-up.mjs` | What that task runs: the bridge, restarted if it stops, logged to `bridge.log` |
+| `bridge/tools.mjs` | The dashboard as tools for your assistant: status, a job's detail, projects, queueing a job |
 | `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
 
 ## Data it expects
