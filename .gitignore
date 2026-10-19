@@ -3,3 +3,7 @@ preview/
 .DS_Store
 bridge/.env
 bridge/bridge.log*
+
+# bridge/addon/relay is made by `npm run addon` — one copy of the relay
+# lives in the repo, and that script is how it reaches the hub.
+bridge/addon/relay/

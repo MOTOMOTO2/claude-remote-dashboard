@@ -1,0 +1,67 @@
+# The house relay, as a Home Assistant add-on.
+#
+# This is the piece that makes #/house work when you are not at home. The
+# relay used to run only on the PC, which meant the house was reachable for
+# exactly as long as the desktop happened to be awake — and a desktop is
+# asleep precisely when you are out and want the hall light. Here it runs on
+# the hub, which is on all the time, because being on all the time is what a
+# smart home hub is for.
+#
+# It opens nothing. The add-on talks outward to Supabase and inward to Home
+# Assistant over the Supervisor API, so there is no port to forward and no
+# long-lived access token to make: `homeassistant_api: true` is the whole
+# of its access to your house.
+name: House relay
+version: "1.0.0"
+slug: house_relay
+description: >-
+  Mirrors this hub into your claude-remote dashboard and obeys what you tap
+  there, so the house is reachable from anywhere without forwarding a port.
+url: https://github.com/
+# A Pi is arm64 or armv7; the rest are here so a NUC or an old laptop
+# running Home Assistant can use the same add-on.
+arch:
+  - aarch64
+  - armv7
+  - armhf
+  - amd64
+  - i386
+startup: services
+boot: auto
+init: false
+
+# Everything the relay needs from the house, and nothing more: the
+# Supervisor proxy to Home Assistant's own API.
+homeassistant_api: true
+hassio_api: false
+
+options:
+  supabase_url: ""
+  supabase_anon_key: ""
+  supabase_email: ""
+  supabase_password: ""
+  supabase_service_key: ""
+  relay_name: ""
+  hub_name: ""
+  keep_all_sensors: false
+  exclude: ""
+  poll_seconds: 10
+
+schema:
+  # The same project the dashboard uses — Settings → API in Supabase.
+  supabase_url: str
+  # Either the publishable key plus your own sign-in (preferred: row-level
+  # security still applies), or the service-role key on its own.
+  supabase_anon_key: str?
+  supabase_email: str?
+  supabase_password: password?
+  supabase_service_key: password?
+  # What the dashboard calls this relay, and the house. Both optional.
+  relay_name: str?
+  hub_name: str?
+  # A real install has hundreds of diagnostic sensors; off keeps the ones a
+  # house screen is actually for.
+  keep_all_sensors: bool?
+  # A regex of entity ids to leave out entirely.
+  exclude: str?
+  poll_seconds: int(5,300)?

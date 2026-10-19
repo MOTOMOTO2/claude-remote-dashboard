@@ -52,9 +52,9 @@ export const state = {
   /** Whether the chat tables are there at all, and why not if they aren't. */
   askReady: false,
   askError: null,
-  /** Your house: every device the hub reports, the relay, and taps in flight. */
+  /** Your house: every device the hub reports, the relays, and taps in flight. */
   devices: [],
-  hub: null,
+  hubs: [],
   commands: [],
   houseReady: false,
   houseError: null,
@@ -627,10 +627,13 @@ export async function deleteConversation(id) {
 // still works — the House screen says the migration hasn't run.
 
 const DEVICE_LIMIT = 400;
+const RELAY_LIMIT = 8;
 
 const devicesQuery = () => sb.from('house_devices').select('*').limit(DEVICE_LIMIT);
+// Every relay, not the newest one: a PC that went to sleep hours ago must
+// not make a Pi that is relaying right now look like a dead house.
 const hubQuery = () => sb.from('house_hubs').select('*')
-  .order('last_seen', { ascending: false }).limit(1);
+  .order('last_seen', { ascending: false }).limit(RELAY_LIMIT);
 const commandsQuery = (n = 60) => sb.from('house_commands').select('*')
   .order('id', { ascending: false }).limit(n);
 
@@ -651,14 +654,14 @@ export async function loadHouse() {
   }
   // No hub row simply means nothing has checked in, which the screen says
   // for itself — it is not an error worth colouring the page over.
-  state.hub = hubRes.error ? null : (hubRes.data?.[0] ?? null);
+  state.hubs = hubRes.error ? [] : (hubRes.data ?? []);
   changed();
 }
 
-/** Is the relay there? One row, so it rides the same ten-second timer. */
+/** Is a relay there? A handful of rows, so it rides the ten-second timer. */
 export async function pollHub() {
   const { data, error } = await hubQuery();
-  if (!error) state.hub = data?.[0] ?? null;
+  if (!error) state.hubs = data ?? [];
   changed();
 }
 
@@ -696,7 +699,7 @@ function takeCommand(row) {
 export const houseDevices = () => state.devices;
 export const houseRoomList = () => houseRooms(state.devices);
 export const houseSummaryNow = () => houseSummary(state.devices);
-export const housePresence = () => hubPresence(state.hub);
+export const housePresence = () => hubPresence(state.hubs);
 export const houseState = () => hubState(housePresence());
 export const housePending = () => pendingBy(state.commands);
 export const houseBusy = () => state.commands.filter(isQueued);

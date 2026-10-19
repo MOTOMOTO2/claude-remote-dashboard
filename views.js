@@ -14,7 +14,7 @@ import { catalog, languages, narrow, order, tally, liveHost, webUrl } from './ca
 import { replyState, turns as askTurns, STARTERS, isPending } from './assistant.js';
 import {
   kindOf, kindIcon, isOn, isAway, stateWord, detailLine, actionsFor, isDimmable,
-  nudged, commandLabel, litLights, isQueued,
+  nudged, commandLabel, litLights, isQueued, RELAY_HOSTS,
 } from './house.js';
 import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
@@ -1431,21 +1431,72 @@ function houseSetupHtml() {
       </div>`;
   }
   return `
-    <p class="setup-step"><span class="setup-n">2</span>Point the relay at your hub</p>
+    <p class="setup-step"><span class="setup-n">2</span>Put a relay next to your hub</p>
     <div class="info-row"><span class="info-k">Hub</span>
       <span class="info-v"><span class="state" data-status="paused"><i class="dot"></i>never checked in</span></span></div>
-    <div class="info-row"><span class="info-k">In bridge/.env</span>
-      <span class="info-v"><code>HA_URL</code> · <code>HA_TOKEN</code></span></div>
-    <p class="info-note">Your hub is taken to be Home Assistant on the Pi.
-      <code>HA_URL</code> is its address on your own network —
-      <code>http://homeassistant.local:8123</code> — and <code>HA_TOKEN</code> is a
-      long-lived access token from your Home Assistant profile. Then
-      <code>node bridge/house.mjs --try</code> proves it answers, and
-      <code>npm run bridge</code> keeps it mirrored here.</p>
+    <div class="info-row"><span class="info-k">On the hub</span>
+      <span class="info-v"><code>bridge/addon</code> — reachable whenever the hub is</span></div>
+    <div class="info-row"><span class="info-k">On your PC</span>
+      <span class="info-v"><code>HA_URL</code> · <code>HA_TOKEN</code> in <code>bridge/.env</code></span></div>
+    <p class="info-note">Your hub is taken to be Home Assistant on the Pi, and the
+      relay can run in either place. <b>On the hub</b> is the one that works while you
+      are out: copy <code>bridge/addon</code> into the hub's <code>addons</code> share,
+      install it from Settings → Add-ons, and it needs no token at all.
+      <b>On your PC</b> is quicker to try — set <code>HA_URL</code> to
+      <code>http://homeassistant.local:8123</code> and <code>HA_TOKEN</code> to a
+      long-lived access token, then <code>npm run bridge</code> — but the house is
+      then reachable only while the PC is awake.</p>
     <div class="setup-acts">
       <button class="btn tiny" data-copy-cmd="node bridge/house.mjs --try">${icon('copy')}copy the check</button>
       ${recheck}
     </div>`;
+}
+
+/**
+ * Every relay that has ever checked in, and what each one means for whether
+ * the house is reachable right now. Worth its own block because the useful
+ * answer is rarely one row: a Pi that is always up and a PC that is up
+ * sometimes read very differently, and only the list says which you have.
+ */
+function renderHouseRelays(who) {
+  const list = who.relays ?? [];
+  $('house-relay-block').hidden = list.length === 0;
+  if (!list.length) return;
+
+  $('house-relay-count').textContent = String(list.length);
+  $('house-relay-note').textContent = who.online
+    ? `${who.online} of ${list.length} up` : 'none up';
+
+  $('house-relays').innerHTML = list.map((r) => {
+    const status = r.reachable ? 'done' : r.online ? 'error' : 'paused';
+    const word = r.reachable ? (r.mirroring ? 'mirroring' : 'ready')
+      : r.online ? 'hub not answering' : 'asleep';
+    return `
+    <div class="row" data-status="${status}">
+      <span class="row-top">
+        <span class="row-name">${esc(r.id)}</span>
+        <span class="state" data-status="${status}">
+          <i class="dot${r.reachable ? ' live' : ''}"></i>${esc(word)}</span>
+        <span class="row-when" data-ago="${esc(r.lastSeen ?? '')}">${
+          r.lastSeen ? ago(r.lastSeen) : '—'}</span>
+      </span>
+      <span class="row-sub">${esc(RELAY_HOSTS[r.host]?.note
+        ? `${r.where} — ${RELAY_HOSTS[r.host].note}` : r.where)}${
+        r.error ? esc(` — ${clip(r.error, 80)}`) : ''}</span>
+    </div>`;
+  }).join('');
+
+  // The one thing worth saying unprompted, because it is the difference
+  // between a house you can reach from the bus and one you cannot.
+  const hint = $('house-relay-hint');
+  hint.hidden = !who.needsPc;
+  if (who.needsPc) {
+    hint.innerHTML = 'Every relay you have runs on a PC, so the house is reachable only '
+      + 'while that PC is awake — which is usually not the case when you are out. '
+      + 'The same relay runs on the hub itself, where nothing extra has to be on: '
+      + '<code>npm run addon</code>, copy <code>bridge/addon</code> into the hub&rsquo;s '
+      + '<code>addons</code> share, and install it from Settings &rarr; Add-ons.';
+  }
 }
 
 /** One device: what it is, what it is doing, and the tap that changes it. */
@@ -1519,6 +1570,12 @@ export function renderHouse() {
   const tone = st.kind === 'ok' ? 'done' : st.kind === 'hub-off' ? 'error' : 'paused';
   const chips = [`<span class="stat-chip" data-status="${tone}"><i class="dot${
     st.kind === 'ok' ? ' live' : ''}"></i>${esc(who.known ? `${who.name} · ${st.label}` : st.label)}</span>`];
+  // Where it is relayed from is the difference between "works when I am out"
+  // and "works when the desktop happens to be awake", so it goes up here.
+  if (st.kind === 'ok') {
+    chips.push(`<span class="stat-chip" data-status="${who.onHub ? 'done' : 'paused'}">${
+      icon(who.onHub ? 'house' : 'server')}${esc(who.relays[0]?.where ?? 'relayed')}</span>`);
+  }
   if (s.temperature != null) {
     chips.push(`<span class="stat-chip">${icon('thermometer')}${esc(s.temperature)}°</span>`);
   }
@@ -1569,6 +1626,8 @@ export function renderHouse() {
       </div>
     </section>`).join('');
 
+  renderHouseRelays(who);
+
   // What just happened, including anything your assistant did.
   const log = houseRecent(8);
   $('house-log-block').hidden = !log.length;
@@ -1617,11 +1676,15 @@ export function renderHouseHome() {
 
   $('house-block-note').textContent = st.label;
 
+  const carrying = who.relays?.find((r) => r.id === who.relay) ?? null;
   const rows = [
     ['Hub', who.known ? esc(who.name) : 'none has checked in'],
     ['State', `<span class="state" data-status="${st.kind === 'ok' ? 'done'
       : st.kind === 'hub-off' ? 'error' : 'paused'}">
          <i class="dot${st.kind === 'ok' ? ' live' : ''}"></i>${esc(st.label)}</span>`],
+    ['Relayed', carrying
+      ? `${esc(carrying.where)}${who.online > 1 ? esc(` · ${who.online} relays up`) : ''}`
+      : 'nothing is relaying'],
     ['On right now', s.on ? esc(s.sentence) : 'nothing'],
     ['Last heard', who.lastSeen
       ? `<span data-since="${esc(who.lastSeen)}">${since(who.lastSeen)}</span>`

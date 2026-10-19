@@ -104,10 +104,19 @@ export function seed() {
   // Your house: a hub that is answering, two rooms with something on, a
   // thermostat, a door contact, a scene, and one bulb that has dropped off
   // the network — the states the screen has to tell apart.
-  fake.tables.house_hubs = [{
-    owner: 'u1', name: 'home assistant', kind: 'home-assistant',
-    devices: 8, reachable: true, error: null, last_seen: new Date().toISOString(),
-  }];
+  // Two relays, which is the setup worth drawing: the one on the hub keeps
+  // the house reachable when the desktop is asleep, and the desktop's own
+  // stands by and obeys taps.
+  fake.tables.house_hubs = [
+    { owner: 'u1', relay: 'hub', host: 'hub', priority: 10, mirroring: true,
+      name: 'home assistant', kind: 'home-assistant',
+      devices: 8, reachable: true, error: null, last_seen: new Date().toISOString() },
+    // Asleep for an hour and a half, which is the point: the house is still
+    // online, because the relay carrying it is not on this machine.
+    { owner: 'u1', relay: 'desktop', host: 'pc', priority: 0, mirroring: false,
+      name: 'home assistant', kind: 'home-assistant',
+      devices: 8, reachable: true, error: null, last_seen: iso(90) },
+  ];
 
   fake.tables.house_devices = [
     { owner: 'u1', entity_id: 'light.kitchen_ceiling', name: 'Kitchen ceiling', area: 'Kitchen',

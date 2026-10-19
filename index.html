@@ -443,9 +443,19 @@
         <div id="house-rooms" class="stack"></div>
 
         <p id="house-empty" class="empty-note" hidden>
-          Nothing has been mirrored yet. The relay on your PC fills this in the first
-          time it reaches the hub.
+          Nothing has been mirrored yet. A relay fills this in the first time it
+          reaches the hub.
         </p>
+
+        <section id="house-relay-block" class="block" hidden>
+          <h2 class="block-h">
+            <span>What is relaying</span>
+            <span id="house-relay-count" class="count"></span>
+            <span id="house-relay-note" class="block-note"></span>
+          </h2>
+          <div id="house-relays" class="stack"></div>
+          <p id="house-relay-hint" class="info-note" hidden></p>
+        </section>
 
         <section id="house-log-block" class="block" hidden>
           <h2 class="block-h">
@@ -456,8 +466,9 @@
         </section>
 
         <p class="empty-note center">Your hub is on your own network and this page is
-           not. Everything here goes through the relay on your PC — no port is open to
-           the internet, and the hub's token never leaves that machine.</p>
+           not. Everything here goes through a relay on that network — no port is open
+           to the internet, and the hub's token never leaves it. Run that relay on the
+           hub itself and the house is reachable whether or not your PC is awake.</p>
       </section>
 
       <!-- ── ideas ─────────────────────────────────────────── -->
