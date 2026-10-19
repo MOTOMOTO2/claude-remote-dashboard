@@ -12,7 +12,10 @@
     "mobile": "node tools/mobile-audit.mjs",
     "bridge": "node bridge/bridge.mjs",
     "bridge:setup": "node bridge/setup.mjs",
-    "bridge:try": "node bridge/bridge.mjs --try"
+    "bridge:try": "node bridge/bridge.mjs --try",
+    "house": "node bridge/house.mjs",
+    "house:try": "node bridge/house.mjs --try",
+    "house:list": "node bridge/ha.mjs"
   },
   "devDependencies": {
     "jsdom": "^27.0.0"

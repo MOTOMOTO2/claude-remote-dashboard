@@ -1030,6 +1030,196 @@ await askStore.loadAsk();
 window.location.hash = '#/agents';
 await tick();
 
+// ── 10f. your house ───────────────────────────────────────────────────
+// The third relay. Same rule as the other two: the screen never claims a
+// tap landed when the thing that would land it is asleep, and a device that
+// has dropped off the network is not drawn as "off".
+
+window.location.hash = '#/house';
+await tick();
+
+ok('the house view is shown', !el('house-view').hidden);
+ok('every other view steps aside there',
+  el('home-view').hidden && el('chat-view').hidden && el('ask-view').hidden
+  && el('agents-view').hidden && el('projects-view').hidden);
+ok('the composer stays away — there is nothing to type here', el('composer').hidden);
+ok('so the tabs keep the bottom of the window', !el('tabbar').hidden);
+has('the topbar names it', text('view-title'), 'House');
+has('and says the hub is reachable', text('view-sub'), 'online');
+has('and counts the devices', text('view-sub'), '8 devices');
+ok('its sidebar door is marked current', el('house-link').getAttribute('aria-current') === 'page');
+ok('and its tab is too', el('tab-house').getAttribute('aria-current') === 'page');
+ok('nothing is asking you to set anything up', el('house-setup').hidden);
+
+// Two lights, one on; the kitchen switch off; the thermostat heating.
+ok('the hero counts what is on', text('house-value') === '2', text('house-value'));
+has('the chips name the hub and its state', text('house-chips'), 'home assistant · online');
+has('and give the temperature', text('house-chips'), '19.4°');
+has('and the lights as a fraction', text('house-chips'), '1');
+
+const rooms = [...el('house-rooms').querySelectorAll('.room')];
+ok('a block per room', rooms.length === 4, String(rooms.length));
+const roomNames = rooms.map((r) => r.querySelector('.block-h span').textContent.trim());
+ok('rooms with something on come first',
+  roomNames.slice(0, 2).sort().join() === 'Hall,Kitchen', roomNames.join('|'));
+ok('a room where everything is off sinks', roomNames[2] === 'Living room', roomNames.join('|'));
+ok('and the devices with no room at all go last',
+  roomNames.at(-1) === 'No room set', roomNames.join('|'));
+has('a room says how many of its devices are on', el('house-rooms').textContent, '1 on');
+ok('a device with no room is not pretended into one',
+  el('house-rooms').textContent.includes('No room set'));
+
+const ceiling = el('house-rooms').querySelector('[data-house-act][data-entity="light.kitchen_ceiling"]');
+ok('a light that is on offers the tap that turns it off', Boolean(ceiling));
+ok('and that tap is the whole card', ceiling.classList.contains('dev-main'));
+ok('its action is off, because it is on', ceiling.dataset.houseAct === 'off');
+has('the card says how bright it is', ceiling.textContent, '80%');
+ok('a dimmer rides under a light that is on',
+  Boolean(el('house-rooms').querySelector('[data-house-dim="light.kitchen_ceiling"]')));
+ok('and not under one that is off',
+  !el('house-rooms').querySelector('[data-house-dim="light.kitchen_under"]'));
+
+const dead = [...el('house-rooms').querySelectorAll('.dev')]
+  .find((d) => d.textContent.includes('Bad'));
+ok('a device that is not answering is not drawn as merely off',
+  dead?.dataset.status === 'error', dead?.dataset.status);
+ok('and has no tap at all', !dead.querySelector('[data-house-act]'));
+ok('a device name from the hub is escaped',
+  !el('house-rooms').innerHTML.includes('<b>lamp</b>')
+  && el('house-rooms').innerHTML.includes('&lt;b&gt;lamp&lt;/b&gt;'));
+ok('and so is an entity id', !el('house-rooms').innerHTML.includes('<script>alert(1)'));
+
+const thermostat = [...el('house-rooms').querySelectorAll('.dev')]
+  .find((d) => d.textContent.includes('Hall thermostat'));
+has('a thermostat says both temperatures', thermostat.textContent, 'now 19.4°');
+has('and what it is set to', thermostat.textContent, 'set 20.5°');
+const warmer = thermostat.querySelector('[data-house-act="temperature"]');
+ok('and nudges from where it is, not from zero', Number(warmer.dataset.value) === 21,
+  warmer.dataset.value);
+
+has('a scene offers to run', el('house-quick').textContent, 'Movie night');
+has('and the lights you left on offer to go off', el('house-quick').textContent, 'turn 1 light off');
+
+has('what your assistant did is on the list too', el('house-log').textContent, 'did this');
+
+// ── tapping one ───────────────────────────────────────────────────────
+
+const tapsBefore = fake.inserts.length;
+ceiling.click();
+await tick();
+
+const tap = fake.inserts.slice(tapsBefore);
+ok('a tap writes exactly one command', tap.length === 1, `wrote ${tap.length}`);
+ok('aimed at that device, with the action the card showed',
+  tap[0].entity_id === 'light.kitchen_ceiling' && tap[0].action === 'off'
+  && tap[0].status === 'queued' && tap[0].source === 'dashboard', JSON.stringify(tap[0]));
+has('and the toast says what is happening', el('toasts').textContent, 'turning');
+has('the card says it is in flight, before anything has come back',
+  el('house-rooms').textContent, 'turning');
+
+// The relay picks it up and the hub confirms: the card follows.
+const houseStore = await import('../store.js');
+const houseViews = await import('../views.js');
+fake.tables.house_commands.find((c) => c.entity_id === 'light.kitchen_ceiling'
+  && c.status === 'queued').status = 'done';
+fake.tables.house_devices.find((d) => d.entity_id === 'light.kitchen_ceiling').is_on = false;
+fake.tables.house_devices.find((d) => d.entity_id === 'light.kitchen_ceiling').state = 'off';
+await houseStore.pollHouse();
+await tick();
+ok('once it lands, the card is simply off', text('house-value') === '1', text('house-value'));
+
+// ── a room's worth at once ────────────────────────────────────────────
+
+fake.tables.house_devices.find((d) => d.entity_id === 'light.kitchen_ceiling').is_on = true;
+fake.tables.house_devices.find((d) => d.entity_id === 'light.kitchen_under').is_on = true;
+await houseStore.loadHouse();
+await tick();
+
+const allBefore = fake.inserts.length;
+el('house-quick').querySelector('[data-house-all="lights-off"]').click();
+await tick();
+const both = fake.inserts.slice(allBefore);
+ok('"all lights off" writes one row per light, so each can fail alone',
+  both.length === 2 && both.every((c) => c.action === 'off'), JSON.stringify(both));
+ok('and never touches anything that is not a light',
+  !both.some((c) => c.entity_id.startsWith('switch.')), JSON.stringify(both));
+
+// ── a tap the hub refused ─────────────────────────────────────────────
+
+const toastsBefore = el('toasts').textContent;
+fake.emit('house_commands', 'UPDATE', {
+  id: 'new-1', owner: 'u1', entity_id: 'light.kitchen_ceiling', name: 'Kitchen ceiling',
+  action: 'off', status: 'error', error: 'bulb did not answer', created_at: iso(0),
+});
+await tick();
+ok('a refused tap says so rather than looking like nothing happened',
+  el('toasts').textContent !== toastsBefore
+  && el('toasts').textContent.includes('bulb did not answer'), el('toasts').textContent);
+
+// ── the PC asleep ─────────────────────────────────────────────────────
+
+fake.tables.house_hubs = [{
+  owner: 'u1', name: 'home assistant', kind: 'home-assistant',
+  devices: 8, reachable: true, error: null, last_seen: iso(40),
+}];
+await houseStore.loadHouse();
+await tick();
+has('a stale heartbeat is the PC, not the hub', text('house-chips'), 'waiting for your PC');
+
+const queuedBefore = fake.inserts.length;
+el('house-rooms').querySelector('[data-house-act]').click();
+await tick();
+ok('a tap still goes in while the PC is off', fake.inserts.length === queuedBefore + 1);
+has('and the toast says it is waiting rather than done',
+  el('toasts').textContent, 'when your PC is back');
+
+// ── the hub itself not answering ──────────────────────────────────────
+
+fake.tables.house_hubs = [{
+  owner: 'u1', name: 'home assistant', kind: 'home-assistant', devices: 8,
+  reachable: false, error: 'homeassistant.local unreachable (ECONNREFUSED)',
+  last_seen: new Date().toISOString(),
+}];
+await houseStore.loadHouse();
+await tick();
+has('a relay that is up but a hub that is not says which', text('house-chips'), 'not answering');
+has('and home says the same thing in a sentence', houseViews.houseExplainer(), 'did not answer it');
+
+// ── a schema that predates the house ──────────────────────────────────
+
+fake.failTable('house_devices', 'relation "public.house_devices" does not exist');
+await houseStore.loadHouse();
+await tick();
+ok('a missing table is a setup card, not a crash', !el('house-setup').hidden);
+has('it names the file to run', el('house-setup').textContent, 'bridge/schema.sql');
+has('and says what the read actually said', el('house-setup').textContent, 'does not exist');
+ok('with a button that copies it', Boolean(el('house-setup').querySelector('[data-copy-schema]')));
+has('the topbar admits it is not set up', text('view-sub'), 'not set up yet');
+
+el('house-setup').querySelector('[data-copy-schema]').click();
+await tick(120);
+
+fake.failTable('house_devices', null);
+fake.tables.house_hubs = [];
+await houseStore.loadHouse();
+await tick();
+ok('tables but no hub is the second step, not the first',
+  el('house-setup').textContent.includes('Point the relay at your hub'));
+has('and names what to put in the .env', el('house-setup').textContent, 'HA_TOKEN');
+
+el('house-setup').querySelector('[data-house-recheck]').click();
+await tick();
+ok('checking again re-reads rather than asking you to reload',
+  el('toasts').textContent.length > 0);
+
+// Put the house back the way the rest of the walk expects to find it.
+fake.tables.house_hubs = [{
+  owner: 'u1', name: 'home assistant', kind: 'home-assistant',
+  devices: 8, reachable: true, error: null, last_seen: new Date().toISOString(),
+}];
+await houseStore.loadHouse();
+await tick();
+
 // ── 11. clearing a chat ───────────────────────────────────────────────
 
 window.location.hash = '#/p/beta';
@@ -1731,6 +1921,89 @@ ok('the queue is read in the order the bridge would claim it',
   pendingQueue(msgs).map((m) => m.id).join() === '4');
 ok('an empty account has an empty queue', pendingQueue([]).length === 0);
 ok('and no presence to report', presence(undefined).known === false);
+
+// ── 18d. the house model ──────────────────────────────────────────────
+// The arithmetic the House screen draws, checked against fixed rows. The
+// four shapes of "where is my tap?" matter most: collapsing the PC being
+// asleep into the hub being off sends you to the wrong room of the flat.
+
+const {
+  hubPresence: hubWho, hubState: hubWhere, summary: houseSum, rooms: houseRooms2,
+  actionsFor: actsFor, clampValue: clampVal, nudged: nudge, isOn: lampOn,
+  commandLabel: cmdLabel, pendingBy: pendBy, kindOf: whatKind,
+} = await import('../house.js');
+
+const beatNow = new Date().toISOString();
+const beatOld = new Date(Date.now() - 120_000).toISOString();
+
+ok('no hub row at all is "never", not "offline"', hubWhere(hubWho(null)).kind === 'never');
+ok('a beatOld heartbeat is the PC, not the hub',
+  hubWhere(hubWho({ name: 'ha', last_seen: beatOld, reachable: true })).kind === 'relay-off');
+ok('a beatNow heartbeat that says the hub refused is the hub',
+  hubWhere(hubWho({ name: 'ha', last_seen: beatNow, reachable: false, error: 'ECONNREFUSED' })).kind === 'hub-off');
+has('and the note carries the reason',
+  hubWhere(hubWho({ name: 'ha', last_seen: beatNow, reachable: false, error: 'ECONNREFUSED' })).note,
+  'ECONNREFUSED');
+ok('both halves up is the only "ok"',
+  hubWhere(hubWho({ name: 'ha', last_seen: beatNow, reachable: true })).kind === 'ok');
+
+const flat = [
+  { entity_id: 'light.a', name: 'A', area: 'Kitchen', kind: 'light', state: 'on', is_on: true, attrs: { level: 40 } },
+  { entity_id: 'light.b', name: 'B', area: 'Kitchen', kind: 'light', state: 'off', is_on: false, attrs: {} },
+  { entity_id: 'lock.door', name: 'Door', area: 'Hall', kind: 'lock', state: 'unlocked', is_on: true, attrs: {} },
+  { entity_id: 'cover.blind', name: 'Blind', area: 'Hall', kind: 'cover', state: 'open', is_on: true, attrs: { level: 70 } },
+  { entity_id: 'sensor.t', name: 'T', area: 'Hall', kind: 'sensor', state: '21.5', is_on: false, attrs: { device_class: 'temperature', unit: '°C' } },
+  { entity_id: 'light.dead', name: 'Dead', area: 'Hall', kind: 'light', state: 'unavailable', is_on: false, attrs: {} },
+];
+const sum = houseSum(flat);
+ok('the summary counts lights as a fraction', sum.lights === 3 && sum.lit === 1,
+  `${sum.lit}/${sum.lights}`);
+ok('an unlocked lock is the one worth flagging', sum.unlocked === 1, String(sum.unlocked));
+ok('an open blind is counted as open', sum.open === 1);
+ok('a temperature sensor is read as the house temperature', sum.temperature === 21.5,
+  String(sum.temperature));
+ok('and something unreachable is counted apart from "off"', sum.away === 1);
+has('the sentence says the useful part first', sum.sentence, '1 of 3 lights on');
+
+ok('an unavailable device is not counted as on',
+  houseRooms2(flat).find((r) => r.area === 'Hall').on === 2,
+  String(houseRooms2(flat).find((r) => r.area === 'Hall').on));
+
+ok('a lock that is open offers to lock, not to unlock',
+  actsFor(flat[2])[0].action === 'lock');
+ok('a light that is on offers off', actsFor(flat[0])[0].action === 'off');
+ok('a scene only ever offers to run',
+  actsFor({ entity_id: 'scene.x', kind: 'scene', state: 'unknown' }).map((a) => a.action).join() === 'run');
+ok('a plain sensor offers nothing at all',
+  actsFor(flat[4]).length === 0);
+
+ok('brightness is clamped to a percentage', clampVal('level', 480) === 100 && clampVal('level', -5) === 0);
+ok('a temperature is clamped to something a house uses', clampVal('temperature', 90) === 32);
+ok('and rounded to the half degree', clampVal('temperature', 20.3) === 20.5);
+ok('a nudge starts from what the thermostat is set to, not from zero',
+  nudge({ kind: 'climate', attrs: { temperature: 20.5, current_temperature: 18 } }, 0.5) === 21);
+ok('a thermostat with no target yet nudges from the room',
+  nudge({ kind: 'climate', attrs: { current_temperature: 18 } }, -0.5) === 17.5);
+
+ok('a lock reports "unlocked" as its on-state', lampOn({ state: 'unlocked' }) === true);
+ok('an unknown state is not "on"', lampOn({ state: 'unavailable' }) === false);
+ok('an entity id is enough to know what something is',
+  whatKind({ entity_id: 'media_player.kitchen' }) === 'media_player');
+ok('and anything unrecognised lands in "other"',
+  whatKind({ entity_id: 'vacuum.robot' }) === 'other');
+
+has('a command says what it is doing, in words', cmdLabel({ action: 'level', value: 30, name: 'A' }),
+  'setting A to 30%');
+ok('only an unfinished command counts as in flight',
+  pendBy([
+    { id: 1, entity_id: 'light.a', action: 'off', status: 'done', created_at: beatNow },
+    { id: 2, entity_id: 'light.b', action: 'on', status: 'queued', created_at: beatNow },
+  ]).size === 1);
+ok('and the newest one wins when a device is tapped twice',
+  pendBy([
+    { id: 1, entity_id: 'light.a', action: 'off', status: 'queued', created_at: beatOld },
+    { id: 2, entity_id: 'light.a', action: 'on', status: 'queued', created_at: beatNow },
+  ]).get('light.a').action === 'on');
 
 // ── 19b. the bridge's adapters ────────────────────────────────────────
 // The one part of the PC half that has to guess: what shape a reply arrives

@@ -13,9 +13,15 @@ import { ideas, profile, themeLabel } from './ideas.js';
 import { catalog, languages, narrow, order, tally, liveHost, webUrl } from './catalog.js';
 import { replyState, turns as askTurns, STARTERS, isPending } from './assistant.js';
 import {
+  kindOf, kindIcon, isOn, isAway, stateWord, detailLine, actionsFor, isDimmable,
+  nudged, commandLabel, litLights, isQueued,
+} from './house.js';
+import {
   state, isActive, jobList, newest, oldest, threadOf, latestOf,
   projectOf, projectGone, eventsOf, lastActivity, resultOf, fleetNow,
   askChats, askPresence, askPending,
+  houseDevices, houseRoomList, houseSummaryNow, housePresence, houseState,
+  housePending, houseBusy, houseRecent,
 } from './store.js';
 
 // ── bits shared by several views ──────────────────────────────────────
@@ -90,6 +96,7 @@ export function renderTopbar() {
     pending: 'Starting…',
     new: 'New project',
     agents: 'Agents',
+    house: 'House',
     ask: who.known ? who.name : 'Assistant',
     ideas: 'Ideas',
     projects: 'Projects',
@@ -116,6 +123,11 @@ export function renderTopbar() {
       `${f.running.length} of ${f.max} running`,
       f.waiting.length ? `${f.waiting.length} waiting` : '',
     ].filter(Boolean).join(' · ');
+  } else if (route.view === 'house') {
+    const home = houseSummaryNow();
+    sub = state.houseReady
+      ? [houseState().label, home.devices ? plural(home.devices, 'device') : ''].filter(Boolean).join(' · ')
+      : 'not set up yet';
   } else if (route.view === 'ask') {
     const threads = askChats().length;
     sub = [
@@ -217,7 +229,7 @@ export function renderSidebar() {
 
   // The three doors under "New project" say which of them you are behind.
   for (const [id, view] of [['ask-link', 'ask'], ['agents-link', 'agents'],
-    ['projects-link', 'projects'], ['ideas-link', 'ideas']]) {
+    ['house-link', 'house'], ['projects-link', 'projects'], ['ideas-link', 'ideas']]) {
     if (route.view === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
   }
@@ -922,7 +934,8 @@ export function renderFleetBadge() {
 /** The bottom tabs on a phone: which section you are in. */
 export function renderTabs() {
   const doors = [['tab-home', 'home'], ['tab-ask', 'ask'], ['tab-agents', 'agents'],
-    ['tab-new', 'new'], ['tab-projects', 'projects'], ['tab-ideas', 'ideas']];
+    ['tab-house', 'house'], ['tab-new', 'new'], ['tab-projects', 'projects'],
+    ['tab-ideas', 'ideas']];
   for (const [id, view] of doors) {
     if (route.view === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
@@ -1368,6 +1381,265 @@ export function renderAskHome() {
       icon(st.icon)}<span>${esc(clip(st.text, 34))}</span></button>`);
   }
   $('ask-quick').innerHTML = quick.join('');
+}
+
+// ── your house ────────────────────────────────────────────────────────
+// The third thing this app relays, and the one you will open most often —
+// so it is built for the two-second visit: what is on, and the tap that
+// turns it off. Everything else is one screen further down.
+//
+// Two things sit between a tap and a light: the relay on your PC and the
+// hub on your Pi. The screen never pretends both are there — a tap while
+// the PC is asleep says so, and still queues, because that is the truth.
+
+/** A device's state, drawn in the ramp the rest of the app already uses. */
+const deviceStatus = (device, pending) => {
+  if (pending) return 'running';
+  if (isAway(device)) return 'error';
+  return isOn(device) ? 'done' : 'queued';
+};
+
+/** The same thing in a sentence — the toast, and the card on home. */
+export function houseExplainer() {
+  if (!state.houseReady) {
+    return 'The house tables are not in your Supabase project yet. Run bridge/schema.sql, '
+      + 'then point the bridge on your PC at your hub.';
+  }
+  return houseState().note;
+}
+
+/** The two steps, each with the button that does it — as on the Ask screen. */
+function houseSetupHtml() {
+  const editor = sqlEditorUrl();
+  const recheck = `<button class="btn tiny ghost" data-house-recheck>${icon('retry')}check again</button>`;
+
+  if (!state.houseReady) {
+    return `
+      <p class="setup-step"><span class="setup-n">1</span>Add the tables to Supabase</p>
+      <div class="info-row"><span class="info-k">Tables</span>
+        <span class="info-v"><span class="state" data-status="error"><i class="dot"></i>missing</span></span></div>
+      <div class="info-row"><span class="info-k">What to run</span>
+        <span class="info-v"><code>bridge/schema.sql</code></span></div>
+      <p class="info-note">The same one paste as the assistant: it adds the three house
+        tables — your devices, the relay's heartbeat and the taps you make — each locked
+        to your own account.${state.houseError ? ` The read said: ${esc(state.houseError)}` : ''}</p>
+      <div class="setup-acts">
+        <button class="btn tiny" data-copy-schema>${icon('copy')}copy the SQL</button>
+        ${editor ? `<a class="btn tiny ghost" href="${esc(editor)}" target="_blank"
+           rel="noopener">${icon('link')}open the SQL editor</a>` : ''}
+        ${recheck}
+      </div>`;
+  }
+  return `
+    <p class="setup-step"><span class="setup-n">2</span>Point the relay at your hub</p>
+    <div class="info-row"><span class="info-k">Hub</span>
+      <span class="info-v"><span class="state" data-status="paused"><i class="dot"></i>never checked in</span></span></div>
+    <div class="info-row"><span class="info-k">In bridge/.env</span>
+      <span class="info-v"><code>HA_URL</code> · <code>HA_TOKEN</code></span></div>
+    <p class="info-note">Your hub is taken to be Home Assistant on the Pi.
+      <code>HA_URL</code> is its address on your own network —
+      <code>http://homeassistant.local:8123</code> — and <code>HA_TOKEN</code> is a
+      long-lived access token from your Home Assistant profile. Then
+      <code>node bridge/house.mjs --try</code> proves it answers, and
+      <code>npm run bridge</code> keeps it mirrored here.</p>
+    <div class="setup-acts">
+      <button class="btn tiny" data-copy-cmd="node bridge/house.mjs --try">${icon('copy')}copy the check</button>
+      ${recheck}
+    </div>`;
+}
+
+/** One device: what it is, what it is doing, and the tap that changes it. */
+function deviceHtml(device, pending) {
+  const kind = kindOf(device);
+  const status = deviceStatus(device, pending);
+  const acts = isAway(device) ? [] : actionsFor(device);
+  // Some cards are their own first action; a thermostat is not — see house.js.
+  const primary = acts[0]?.inline ? null : (acts[0] ?? null);
+  const rest = primary ? acts.slice(1) : acts;
+  const detail = pending
+    ? commandLabel({ action: pending.action, value: pending.value })
+    : detailLine(device);
+
+  const act = (a) => {
+    const value = a.step != null ? nudged(device, a.step) : '';
+    return `<button class="dev-act" type="button" title="${esc(a.label)}"
+      aria-label="${esc(`${a.label} — ${device.name}`)}"
+      data-house-act="${esc(a.action)}" data-entity="${esc(device.entity_id)}"
+      ${value === '' ? '' : `data-value="${esc(value)}"`}>${icon(a.icon)}</button>`;
+  };
+
+  // The whole card is its first action, so a light is one thumb away.
+  const main = primary
+    ? `<button class="dev-main" type="button" data-house-act="${esc(primary.action)}"
+         data-entity="${esc(device.entity_id)}"${primary.step != null
+          ? ` data-value="${esc(nudged(device, primary.step))}"` : ''}
+         aria-label="${esc(`${primary.label} — ${device.name}`)}">`
+    : '<div class="dev-main">';
+
+  const dim = isDimmable(device) && isOn(device) && !isAway(device)
+    ? `<input class="dev-dim" type="range" min="0" max="100" step="5"
+         value="${esc(Math.round(Number(device.attrs?.level ?? 100)))}"
+         aria-label="${esc(`Brightness — ${device.name}`)}"
+         data-house-dim="${esc(device.entity_id)}">`
+    : '';
+
+  return `
+    <div class="dev" data-status="${esc(status)}" data-kind="${esc(kind)}">
+      ${main}
+        <span class="dev-ico">${icon(kindIcon(kind))}</span>
+        <span class="dev-text">
+          <span class="dev-name">${esc(device.name)}</span>
+          <span class="dev-sub">${esc(detail || stateWord(device))}</span>
+        </span>
+        <span class="state" data-status="${esc(status)}">
+          <i class="dot${pending ? ' live' : ''}"></i>${esc(pending ? 'sending' : stateWord(device))}
+        </span>
+      ${primary ? '</button>' : '</div>'}
+      ${rest.length ? `<div class="dev-acts">${rest.map(act).join('')}</div>` : ''}
+      ${dim}
+    </div>`;
+}
+
+export function renderHouse() {
+  const who = housePresence();
+  const st = houseState();
+  const devices = houseDevices();
+  const s = houseSummaryNow();
+  const pending = housePending();
+
+  const needsSetup = !state.houseReady || !who.known;
+  $('house-setup').hidden = !needsSetup;
+  if (needsSetup) $('house-setup').innerHTML = houseSetupHtml();
+
+  // The hero answers the question people actually open this for.
+  $('house-value').textContent = String(s.on);
+  $('house-label').textContent = s.on === 1 ? 'thing on' : 'things on';
+  $('house-hero').hidden = needsSetup && !devices.length;
+
+  const tone = st.kind === 'ok' ? 'done' : st.kind === 'hub-off' ? 'error' : 'paused';
+  const chips = [`<span class="stat-chip" data-status="${tone}"><i class="dot${
+    st.kind === 'ok' ? ' live' : ''}"></i>${esc(who.known ? `${who.name} · ${st.label}` : st.label)}</span>`];
+  if (s.temperature != null) {
+    chips.push(`<span class="stat-chip">${icon('thermometer')}${esc(s.temperature)}°</span>`);
+  }
+  if (s.lights) {
+    chips.push(`<span class="stat-chip" data-status="${s.lit ? 'done' : 'queued'}"><i class="dot"></i>
+      <b>${s.lit}</b> of <b>${s.lights}</b> lights</span>`);
+  }
+  if (s.open) chips.push(`<span class="stat-chip" data-status="paused"><i class="dot"></i><b>${s.open}</b> open</span>`);
+  if (s.unlocked) chips.push(`<span class="stat-chip" data-status="error"><i class="dot"></i><b>${s.unlocked}</b> unlocked</span>`);
+  if (s.away) chips.push(`<span class="stat-chip" data-status="error"><i class="dot"></i><b>${s.away}</b> not answering</span>`);
+  $('house-chips').innerHTML = chips.join('');
+
+  const busy = houseBusy();
+  $('house-now').hidden = !busy.length;
+  if (busy.length) {
+    $('house-now').innerHTML = `${icon('pulse')}<span>${esc(commandLabel(busy[0]))}${
+      busy.length > 1 ? ` · ${busy.length - 1} more` : ''}</span>`;
+  }
+
+  // One tap: the lights you left on, and whatever scenes the hub knows.
+  const lit = litLights(devices);
+  const scenes = devices.filter((d) => kindOf(d) === 'scene').slice(0, 6);
+  const quick = [];
+  if (lit.length) {
+    quick.push(`<button type="button" class="chip" data-house-all="lights-off">${icon('bulb')}<span>turn ${
+      plural(lit.length, 'light')} off</span></button>`);
+  }
+  for (const sc of scenes) {
+    quick.push(`<button type="button" class="chip" data-house-act="run"
+      data-entity="${esc(sc.entity_id)}">${icon('wand')}<span>${esc(clip(sc.name, 24))}</span></button>`);
+  }
+  $('house-quick-block').hidden = !quick.length;
+  $('house-quick').innerHTML = quick.join('');
+  $('house-quick-note').textContent = lit.length ? `${lit.length} on` : 'scenes';
+
+  // Room by room, the ones with something on first.
+  $('house-empty').hidden = Boolean(devices.length) || needsSetup;
+  $('house-rooms').innerHTML = houseRoomList().map((room) => `
+    <section class="block room">
+      <h2 class="block-h">
+        <span>${esc(room.area)}</span>
+        <span class="count">${room.devices.length}</span>
+        <span class="block-note">${esc(room.on ? `${room.on} on` : 'all off')}${
+          room.away ? esc(` · ${room.away} away`) : ''}</span>
+      </h2>
+      <div class="dev-grid">
+        ${room.devices.map((d) => deviceHtml(d, pending.get(d.entity_id))).join('')}
+      </div>
+    </section>`).join('');
+
+  // What just happened, including anything your assistant did.
+  const log = houseRecent(8);
+  $('house-log-block').hidden = !log.length;
+  $('house-log-note').textContent = log.some((c) => c.source === 'assistant')
+    ? 'you and your assistant' : '';
+  $('house-log').innerHTML = log.map((c) => {
+    const status = c.status === 'error' ? 'error' : c.status === 'done' ? 'done' : 'running';
+    return `
+    <div class="row" data-status="${esc(status)}">
+      <span class="row-top">
+        <span class="row-name">${esc(commandLabel(c))}</span>
+        <span class="state" data-status="${esc(status)}">
+          <i class="dot${isQueued(c) ? ' live' : ''}"></i>${esc(c.status)}</span>
+        <span class="row-when" data-ago="${esc(c.created_at)}">${ago(c.created_at)}</span>
+      </span>
+      <span class="row-sub">${esc(c.source === 'assistant' ? `${askPresence().name} did this`
+        : 'from this dashboard')}${c.error ? esc(` — ${clip(c.error, 90)}`) : ''}</span>
+    </div>`;
+  }).join('');
+}
+
+/** Taps in flight: the number on the House door and on its tab. */
+export function renderHouseBadge() {
+  const n = houseBusy().length;
+  $('house-count').textContent = n ? String(n) : '';
+  const pip = $('tab-house-count');
+  pip.textContent = n ? String(n) : '';
+  pip.hidden = !n;
+}
+
+/**
+ * Home's corner of the house: whether it is reachable, what is on, and the
+ * one tap worth having without opening the screen. Hidden outright for an
+ * account with no hub — most accounts — rather than advertising a feature
+ * nobody asked for.
+ */
+export function renderHouseHome() {
+  const who = housePresence();
+  const st = houseState();
+  const devices = houseDevices();
+  const s = houseSummaryNow();
+
+  const show = who.known || devices.length > 0;
+  $('house-block').hidden = !show;
+  if (!show) return;
+
+  $('house-block-note').textContent = st.label;
+
+  const rows = [
+    ['Hub', who.known ? esc(who.name) : 'none has checked in'],
+    ['State', `<span class="state" data-status="${st.kind === 'ok' ? 'done'
+      : st.kind === 'hub-off' ? 'error' : 'paused'}">
+         <i class="dot${st.kind === 'ok' ? ' live' : ''}"></i>${esc(st.label)}</span>`],
+    ['On right now', s.on ? esc(s.sentence) : 'nothing'],
+    ['Last heard', who.lastSeen
+      ? `<span data-since="${esc(who.lastSeen)}">${since(who.lastSeen)}</span>`
+      : '—'],
+  ];
+
+  $('house-card').innerHTML = rows.map(([k, v]) => `
+    <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
+    .join('') + `<p class="info-note">${esc(st.note)}</p>`;
+
+  const lit = litLights(devices);
+  const quick = [];
+  if (lit.length) {
+    quick.push(`<button type="button" class="chip" data-house-all="lights-off">${icon('bulb')}<span>turn ${
+      plural(lit.length, 'light')} off</span></button>`);
+  }
+  quick.push(`<a class="chip" href="#/house">${icon('house')}<span>every room</span></a>`);
+  $('house-home-quick').innerHTML = quick.join('');
 }
 
 // ── project chat ──────────────────────────────────────────────────────

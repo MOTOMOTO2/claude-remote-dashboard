@@ -1778,6 +1778,126 @@ a#ask-card:hover { border-color: var(--accent-line); }
    the way the options chip does. */
 #ask-who { cursor: default; }
 
+/* ── your house ─────────────────────────────────────────────────────── */
+/* A device is a state plus one tap, so the card is the tap: the whole thing
+   is the button, the extra verbs are icon buttons beside it, and the dimmer
+   is a rail under it. Status rides the shared ramp — on is `done`, off is
+   `queued`, a tap in flight is `running`, unreachable is `error` — so this
+   screen never invents a colour of its own. */
+
+#house-rooms { display: grid; gap: 1.1rem; }
+#house-rooms:empty { display: none; }
+.room { margin: 0; }
+
+.dev-grid {
+  display: grid; gap: .4rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+}
+
+.dev {
+  display: grid;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  transition: border-color var(--dur-1) ease;
+}
+.dev:hover { border-color: var(--line-strong); }
+/* Something that is on is worth finding at a glance; the border does it, so
+   the word and the dot are not carrying it alone. */
+.dev[data-status="done"] { border-color: color-mix(in srgb, var(--good) 30%, var(--line)); }
+.dev[data-status="error"] { border-color: color-mix(in srgb, var(--critical) 32%, var(--line)); }
+.dev[data-status="running"] { border-color: color-mix(in srgb, var(--active) 34%, var(--line)); }
+
+.dev-main {
+  display: flex; align-items: center; gap: .55rem;
+  width: 100%; min-height: 2.9rem;
+  padding: .5rem .6rem;
+  background: none; border: 0; text-align: left;
+  color: var(--text); font: inherit; cursor: pointer;
+}
+div.dev-main { cursor: default; }
+.dev-main:active { background: var(--surface-2); }
+
+.dev-ico {
+  display: grid; place-items: center; flex: none;
+  width: 1.85rem; height: 1.85rem;
+  border-radius: var(--r-sm);
+  background: var(--surface-2); color: var(--muted);
+}
+.dev[data-status="done"] .dev-ico {
+  background: color-mix(in srgb, var(--good) 13%, var(--surface));
+  color: var(--good-text);
+}
+.dev[data-status="running"] .dev-ico {
+  background: color-mix(in srgb, var(--active) 13%, var(--surface));
+  color: var(--active-text);
+}
+.dev-ico svg { width: 15px; height: 15px; }
+
+.dev-text { flex: 1; min-width: 0; display: grid; gap: .05rem; }
+.dev-name {
+  font-size: 13.5px; font-weight: 560;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dev-sub {
+  font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dev-sub:empty { display: none; }
+.dev-main .state { max-width: 6.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The verbs one card has beyond its first: stop, cooler, close. */
+.dev-acts {
+  display: flex; gap: .2rem; justify-content: flex-end;
+  padding: 0 .45rem .4rem;
+}
+.dev-act {
+  display: grid; place-items: center;
+  min-width: 2.2rem; min-height: 2.5rem;
+  padding: 0 .35rem;
+  background: var(--surface-2); color: var(--text-2);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+.dev-act:hover { border-color: var(--accent-line); color: var(--accent-text); }
+.dev-act:active { transform: scale(.97); }
+.dev-act svg { width: 14px; height: 14px; }
+
+/* The dimmer. Its own row, so a thumb aiming for it cannot hit the card. */
+.dev-dim {
+  -webkit-appearance: none; appearance: none;
+  width: calc(100% - .9rem); height: 1.5rem;
+  margin: 0 .45rem .35rem;
+  background: none; cursor: pointer;
+}
+.dev-dim::-webkit-slider-runnable-track {
+  height: 6px; border-radius: var(--r-full);
+  background: var(--surface-3);
+}
+.dev-dim::-moz-range-track {
+  height: 6px; border-radius: var(--r-full);
+  background: var(--surface-3);
+}
+.dev-dim::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; margin-top: -5px;
+  border-radius: var(--r-full);
+  background: var(--accent); border: 2px solid var(--surface);
+}
+.dev-dim::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: var(--r-full);
+  background: var(--accent); border: 2px solid var(--surface);
+}
+
+#house-setup { margin-bottom: 1.1rem; }
+#house-quick-block { margin-bottom: 1rem; }
+a#house-card { display: block; color: inherit; text-decoration: none; }
+a#house-card:hover { border-color: var(--accent-line); }
+
 /* ── forced colours ─────────────────────────────────────────────────── */
 @media (forced-colors: active) {
   .card, .row, .tile, .msg.agent, .composer-box, .hero-card,

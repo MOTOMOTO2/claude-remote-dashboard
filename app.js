@@ -10,6 +10,7 @@ import {
 } from './ui.js';
 import { route, initRouter, syncRoute, go, projectHref, askHref } from './router.js';
 import { STARTERS } from './assistant.js';
+import { commandLabel } from './house.js';
 
 if (!store.configured) {
   document.body.innerHTML =
@@ -88,6 +89,7 @@ function draw() {
   $('ideas-view').hidden = v !== 'ideas';
   $('projects-view').hidden = v !== 'projects';
   $('agents-view').hidden = v !== 'agents';
+  $('house-view').hidden = v !== 'house';
   $('ask-view').hidden = v !== 'ask';
   // The composer belongs to the two views you type into; everywhere else the
   // bottom of a phone screen is better spent on the tabs.
@@ -112,6 +114,7 @@ function draw() {
   views.renderProjectBadge();
   views.renderFleetBadge();
   views.renderAskBadge();
+  views.renderHouseBadge();
   views.renderTabs();
   // Only two views show them, and they read the whole account to work it out.
   if (v === 'home' || v === 'new') views.renderSuggestions();
@@ -119,9 +122,10 @@ function draw() {
   if (v === 'ideas') views.renderIdeas();
   if (v === 'projects') views.renderProjects();
   if (v === 'agents') views.renderAgents();
+  if (v === 'house') views.renderHouse();
   if (v === 'ask') views.renderAsk();
 
-  if (v === 'home') { views.renderHome(); views.renderAskHome(); }
+  if (v === 'home') { views.renderHome(); views.renderAskHome(); views.renderHouseHome(); }
   if (v === 'project') views.renderChat();
   if (v === 'pending') {
     const job = store.state.jobs.get(route.jobId);
@@ -190,6 +194,7 @@ $('new-project').addEventListener('click', () => { go('#/new'); closeDrawer(); f
 $('ideas-link').addEventListener('click', closeDrawer);
 $('projects-link').addEventListener('click', closeDrawer);
 $('agents-link').addEventListener('click', closeDrawer);
+$('house-link').addEventListener('click', closeDrawer);
 $('ask-link').addEventListener('click', closeDrawer);
 $('home-new').addEventListener('click', () => { go('#/new'); focusPrompt(); });
 
@@ -387,6 +392,31 @@ async function sendToAssistant(text) {
   else { scheduleRender(); scrollToEnd(); }
 }
 
+/**
+ * Tap something in the house. One row per device, so each can fail on its
+ * own — and the toast says where the tap actually got to, which is the part
+ * that differs: your PC asleep, the hub not answering, or a light going off.
+ */
+async function tapHouse(commands) {
+  const { error, rows } = await store.sendCommand(commands);
+  if (error) {
+    toast(`Could not send that — ${error.message}`, { bad: true, ms: 4000 });
+    return;
+  }
+  const st = store.houseState();
+  const what = rows.length > 1
+    ? `${rows.length} devices`
+    : store.deviceOf(rows[0]?.entity_id)?.name ?? 'it';
+  if (st.kind === 'relay-off' || st.kind === 'never') {
+    toast(`Queued — ${what} changes when your PC is back`, { glyph: 'house', ms: 4000 });
+  } else if (st.kind === 'hub-off') {
+    toast(`Sent, but ${store.housePresence().name} is not answering`, { bad: true, ms: 4000 });
+  } else {
+    toast(`${commandLabel({ action: rows[0]?.action, value: rows[0]?.value, name: what })}…`,
+      { glyph: 'house' });
+  }
+}
+
 /** Where that message actually is now — not just "sent". */
 function askSentence() {
   const who = store.askPresence();
@@ -417,9 +447,46 @@ function queuedSentence(slug, id) {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete],[data-copy-schema],[data-copy-cmd],[data-ask-recheck]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete],[data-copy-schema],[data-copy-cmd],[data-ask-recheck],[data-house-act],[data-house-all],[data-house-recheck]');
   if (!btn) return;
   const d = btn.dataset;
+
+  // ── the house ──────────────────────────────────────────────────────
+  // One tap writes one row per device. The row *is* the receipt: the card
+  // says "sending" the moment it lands, whether or not the PC is awake.
+
+  if (d.houseAct) {
+    btn.disabled = true;
+    await tapHouse([{
+      entity_id: d.entity,
+      action: d.houseAct,
+      value: d.value === undefined ? null : Number(d.value),
+    }]);
+    btn.disabled = false;
+    return;
+  }
+
+  if (d.houseAll === 'lights-off') {
+    const lit = store.litLightsNow();
+    if (!lit.length) { toast('Nothing is on', { glyph: 'bulb' }); return; }
+    btn.disabled = true;
+    await tapHouse(lit.map((l) => ({ entity_id: l.entity_id, action: 'off', name: l.name })));
+    btn.disabled = false;
+    return;
+  }
+
+  // Re-read the three tables and say what changed, so the SQL can be run on
+  // the laptop and confirmed from the phone without a reload.
+  if (d.houseRecheck !== undefined) {
+    const was = store.state.houseReady;
+    btn.disabled = true;
+    await store.loadHouse();
+    btn.disabled = false;
+    if (!store.state.houseReady) toast('Still missing — the tables are not there yet', { bad: true });
+    else if (!was) toast('Tables are there. Now point the bridge at your hub.', { glyph: 'check', ms: 4200 });
+    else toast(views.houseExplainer(), { glyph: 'house', ms: 5200 });
+    return;
+  }
 
   // ── setting the assistant up, from the screen that is complaining ──
   // The migration is a file in this repo, so the phone can hand you the SQL
@@ -605,6 +672,18 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// A dimmer is the one control here that isn't a tap. `change`, not `input`,
+// so dragging the slider writes one row at the end rather than twenty.
+document.addEventListener('change', (e) => {
+  const slider = e.target.closest?.('[data-house-dim]');
+  if (!slider) return;
+  tapHouse([{
+    entity_id: slider.dataset.houseDim,
+    action: 'level',
+    value: Number(slider.value),
+  }]);
+});
+
 // keyboard
 document.addEventListener('keydown', (e) => {
   if ($('app').hidden) return;        // nothing to drive from the sign-in screen
@@ -627,6 +706,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/' && !$('composer').hidden) { e.preventDefault(); prompt.focus(); }
   if (e.key === 'n') { e.preventDefault(); go('#/new'); focusPrompt(); }
   if (e.key === 'a') { e.preventDefault(); go('#/agents'); }
+  if (e.key === 'h') { e.preventDefault(); go('#/house'); }
   if (e.key === 'k') { e.preventDefault(); go('#/ask'); focusPrompt(); }
   if (e.key === 'i') { e.preventDefault(); go('#/ideas'); }
   if (e.key === 'p') { e.preventDefault(); go('#/projects'); }
@@ -676,6 +756,14 @@ store.on('reply', (msg) => {
   notify(`${who.name} answered`, firstLine(msg.text));
 });
 store.on('event', (ev) => views.appendLive(ev, scheduleRender));
+store.on('houseFail', (cmd) => {
+  // A device that simply stays as it was looks exactly like a tap that never
+  // registered, so a refused command has to speak up.
+  const what = commandLabel(cmd);
+  toast(`Could not finish ${what} — ${cmd.error ?? 'the hub refused it'}`,
+    { bad: true, ms: 5000 });
+  notify('Your house said no', `${what}: ${cmd.error ?? 'refused'}`);
+});
 store.on('finish', (job) => {
   // The host deploys and re-syncs before it marks a job done, so the new repo
   // or live link is already there to read.
@@ -698,6 +786,8 @@ store.on('finish', (job) => {
 let hostTimer = null;
 let tickTimer = null;
 let replyTimer = null;
+let houseTimer = null;
+let housePoll = 0;
 
 /**
  * A reply streams in as repeated updates to one row, and realtime only
@@ -710,6 +800,18 @@ function tunePoll() {
   const pending = store.state.askReady && store.askPending().length > 0;
   if (pending && !replyTimer) replyTimer = setInterval(() => store.pollReplies(), 1500);
   if (!pending && replyTimer) { clearInterval(replyTimer); replyTimer = null; }
+
+  // Same net, same reason, for the house: while a tap is in flight, or while
+  // you are looking at the rooms, re-read rather than trust the publication.
+  // A tap in flight is worth a fast clock; a room you are reading is not.
+  const busy = store.state.houseReady && store.houseBusy().length > 0;
+  const watching = store.state.houseReady && (busy || route.view === 'house');
+  const every = !watching ? 0 : busy ? 1500 : 6000;
+  if (every !== housePoll) {
+    clearInterval(houseTimer);
+    houseTimer = every ? setInterval(() => store.pollHouse(), every) : null;
+    housePoll = every;
+  }
 }
 
 /**
@@ -738,7 +840,10 @@ async function applySession(session) {
   clearInterval(hostTimer);
   clearInterval(tickTimer);
   clearInterval(replyTimer);
+  clearInterval(houseTimer);
   replyTimer = null;
+  houseTimer = null;
+  housePoll = 0;
 
   if (!signedIn) {
     closeDrawer();
@@ -748,7 +853,7 @@ async function applySession(session) {
 
   syncRoute();
   render();
-  await Promise.all([store.loadAll(route.slug), store.loadAsk()]);
+  await Promise.all([store.loadAll(route.slug), store.loadAsk(), store.loadHouse()]);
   store.subscribe();
   store.pollHost();
   // Usage and the agent ceiling ride the same timer as the host. Realtime on
@@ -759,6 +864,7 @@ async function applySession(session) {
     store.pollUsage();
     store.pollSettings();
     store.pollAssistant();
+    store.pollHub();
   }, 10_000);
   tickTimer = startTicker();
   if (inThread()) scrollToEnd('auto');
@@ -782,6 +888,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && !$('app').hidden) {
     store.loadAll(route.slug);
     store.loadAsk();
+    store.loadHouse();
     store.pollHost();
   }
 });
@@ -790,6 +897,7 @@ window.addEventListener('online', () => {
   setOffline(false);
   store.loadAll(route.slug);
   store.loadAsk();
+  store.loadHouse();
 });
 window.addEventListener('offline', () => setOffline(true));
 setOffline(!navigator.onLine);
