@@ -219,8 +219,8 @@ console.log('');
 if (!todo) {
   console.log(`  ${C.ok}Nothing left.${C.off} Start it and leave it running:\n`);
   console.log(`      ${C.b}npm run bridge${C.off}`);
-  console.log(`      ${C.dim}powershell -ExecutionPolicy Bypass -File bridge\\run-at-logon.ps1${C.off}`
-    + `   (and at every logon)\n`);
+  console.log(`\n  ${C.dim}Or have Windows keep it running, from an Administrator PowerShell:${C.off}\n`);
+  console.log(`      powershell -ExecutionPolicy Bypass -File "${fileURLToPath(new URL('run-at-logon.ps1', here))}"\n`);
 } else {
   console.log(`  ${todo} thing${todo === 1 ? '' : 's'} left. Do ${todo === 1 ? 'it' : 'them'} and run `
     + `${C.b}npm run bridge:setup${C.off} again.\n`);

@@ -276,16 +276,24 @@ with `if` statements, so step 3 works before your own assistant is wired in.
 It is also the shape to copy.
 
 **Keeping it up.** "Reachable as long as the PC is on" is only true if
-something starts the bridge when the PC starts. On Windows:
+something starts the bridge when the PC starts. On Windows, from an
+Administrator PowerShell (`npm run bridge:setup` prints this line with the
+full path, so it works from whatever folder the window opens in):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File bridge\run-at-logon.ps1
+powershell -ExecutionPolicy Bypass -File "<this repo>\bridge\run-at-logon.ps1"
 ```
 
-That registers a Scheduled Task — at logon, restarted if it stops, no console
-window — and prints how to start it now, check on it, and undo it. Nothing in
-this repo runs it for you. Anywhere else, the usual suspects work: `pm2 start
-bridge/bridge.mjs`, a systemd unit, `launchd`.
+That registers a Scheduled Task and starts it. It runs at boot and at logon,
+*whether or not you are logged on*, which is the one way Windows runs a task
+with no window — otherwise Windows 11 gives it a Terminal window, and closing
+that silently takes the phone offline. The task runs `bridge/keep-up.mjs`,
+which starts the bridge again whenever it stops (Task Scheduler's own
+restart only covers a task that never started) and writes its output to
+`bridge/bridge.log`. The script prints how to watch that log and how to undo
+it; `-Remove` stops the task too. Nothing in this repo runs it for you.
+Anywhere else, the usual suspects work: `pm2 start bridge/bridge.mjs`, a
+systemd unit, `launchd`.
 
 **Signing in.** Prefer `SUPABASE_ANON_KEY` with `SUPABASE_EMAIL` and
 `SUPABASE_PASSWORD`: the bridge signs in as you, row-level security still
@@ -598,7 +606,9 @@ the same message; the answer is written several times over rather than once
 at the end, which is what makes it read like typing; a stop lands as *done*
 with "(stopped)" rather than as a failure; an assistant that exits non-zero
 leaves the reply in `error` with its own stderr in it; and with nothing
-queued the bridge still checks in before it stops. Deleting the status filter
+queued the bridge still checks in before it stops. It runs `keep-up.mjs` the
+same way: a bridge that stops is started again, its output lands in the log,
+and killing the keeper takes the bridge with it. Deleting the status filter
 from the claim fails that suite, which is the point of writing it.
 
 The Supabase CDN import is swapped for a local fake by a Node module loader
@@ -662,6 +672,7 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `bridge/schema.sql` | The four tables this account needs, in one paste |
 | `bridge/example-assistant.mjs` | A stand-in assistant, and the shape to copy |
 | `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
+| `bridge/keep-up.mjs` | What that task runs: the bridge, restarted if it stops, logged to `bridge.log` |
 | `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
 
 ## Data it expects
