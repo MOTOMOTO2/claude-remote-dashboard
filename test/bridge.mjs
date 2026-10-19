@@ -575,6 +575,25 @@ const entity = (id, state, attributes = {}) => ({ entity_id: id, state, attribut
     tables.house_hubs[0]?.reachable === true && tables.house_hubs[0]?.name === 'the flat'
       && tables.house_hubs[0]?.owner === 'u1',
     JSON.stringify(tables.house_hubs[0]));
+  // With no HA_NAME set — the add-on's default — the house should be called
+  // whatever the hub calls itself, not "home assistant".
+  const unnamed = await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['bridge/house.mjs', '--once'], {
+      cwd: root,
+      env: bridgeEnv(port, null, {
+        HA_URL: `http://127.0.0.1:${hub.port}`, HA_TOKEN: 'ha-token',
+        HA_NAME: '', HOUSE_RELAY: 'unnamed',
+      }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('close', () => resolve(out));
+  });
+  ok('with no HA_NAME it uses the name the hub gives itself',
+    tables.house_hubs.find((r) => r.relay === 'unnamed')?.name === 'The flat',
+    JSON.stringify(tables.house_hubs.map((r) => `${r.relay}:${r.name}`)) + unnamed);
   // PostgREST answers a `return=minimal` write with no body at all. Reading
   // that as "the table is not there" stopped the relay dead on its first
   // heartbeat, and every symptom of it was silence.

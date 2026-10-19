@@ -73,6 +73,22 @@ async function haFetch(path, { method = 'GET', body, raw = false } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+/**
+ * What to call the house on the dashboard. HA_NAME wins; otherwise the hub's
+ * own location name, asked for once and then remembered — "home assistant"
+ * is the name of a program, not of anybody's flat.
+ */
+let learnedName = '';
+export async function houseName() {
+  if (env.HA_NAME) return env.HA_NAME;
+  if (!learnedName) {
+    learnedName = await haFetch('/config')
+      .then((c) => String(c?.location_name ?? '').trim())
+      .catch(() => '');
+  }
+  return learnedName || config().name;
+}
+
 /** Hello, and what version. The check `--try` and the setup script both run. */
 export async function hello() {
   const body = await haFetch('/');
