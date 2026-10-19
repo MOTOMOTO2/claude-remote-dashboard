@@ -110,8 +110,13 @@ const asked = {
   text: 'hello', created_at: new Date(Date.now() - 1000).toISOString(),
 };
 
-/** Everything the bridge reads, pointed at the fake instead of your .env. */
-const bridgeEnv = (port, cmd) => ({
+/**
+ * Everything the bridge reads, pointed at the fake instead of your .env.
+ * Every variable it might pick up is named here, blank if the test does not
+ * want it — otherwise a real bridge/.env on this machine leaks in, and a
+ * test run would talk to the actual hub in the actual house.
+ */
+const bridgeEnv = (port, cmd, extra = {}) => ({
   ...process.env,
   SUPABASE_URL: `http://127.0.0.1:${port}`,
   SUPABASE_ANON_KEY: 'anon',
@@ -123,6 +128,12 @@ const bridgeEnv = (port, cmd) => ({
   ASSISTANT_MODEL: 'test-brain',
   ASSISTANT_URL: '',
   ASSISTANT_CMD: cmd ?? `"${process.execPath}" bridge/example-assistant.mjs`,
+  HA_URL: '',
+  HA_TOKEN: '',
+  HA_NAME: '',
+  HA_SENSORS: '',
+  HA_EXCLUDE: '',
+  ...extra,
 });
 
 /** Run the real bridge once against the fake, and hand back what it did. */
@@ -289,17 +300,47 @@ function startTables(tables) {
     if (url.pathname === '/auth/v1/token') { send({ access_token: 'tok', user: { id: 'u1' } }); return; }
     const table = url.pathname.replace('/rest/v1/', '');
     if (!tables[table]) { send({ code: 'PGRST205', message: `no table ${table}` }, 404); return; }
-    if (req.method === 'POST') {
-      const row = { id: `job-${tables[table].length + 1}`, status: 'queued', created_at: new Date().toISOString(), ...body };
-      tables[table].push(row);
-      send([row]);
-      return;
-    }
+
     const where = [...url.searchParams]
       .filter(([k]) => !['select', 'order', 'limit'].includes(k))
-      .map(([k, v]) => [k, v.replace(/^eq\./, '')]);
+      .map(([k, v]) => [k, v.replace(/^eq\./, '')])
+      // `in.("a","b")` is the only other filter anything here writes.
+      .map(([k, v]) => [k, v.startsWith('in.(')
+        ? v.slice(4, -1).split(',').map((s) => s.replace(/^"|"$/g, '')) : v]);
+    const hit = (r) => where.every(([k, v]) => (Array.isArray(v)
+      ? v.includes(String(r[k] ?? '')) : String(r[k] ?? '') === v));
+
+    if (req.method === 'POST') {
+      // A mirror writes a page of devices at once; everything else writes one.
+      const rows = (Array.isArray(body) ? body : [body]).map((one) => {
+        const key = one.entity_id ?? one.owner;
+        const found = key && tables[table].find((r) => (one.entity_id
+          ? r.entity_id === one.entity_id && r.owner === one.owner
+          : r.owner === one.owner && table === 'house_hubs'));
+        if (found) { Object.assign(found, one); return found; }
+        const row = { id: `job-${tables[table].length + 1}`, status: 'queued', created_at: new Date().toISOString(), ...one };
+        tables[table].push(row);
+        return row;
+      });
+      send(rows);
+      return;
+    }
+
+    if (req.method === 'PATCH') {
+      const changed = tables[table].filter(hit);
+      for (const r of changed) Object.assign(r, body);
+      send(changed);
+      return;
+    }
+
+    if (req.method === 'DELETE') {
+      tables[table] = tables[table].filter((r) => !hit(r));
+      send([]);
+      return;
+    }
+
     const limit = Number(url.searchParams.get('limit') ?? 1000);
-    send(tables[table].filter((r) => where.every(([k, v]) => String(r[k] ?? '') === v)).slice(0, limit));
+    send(tables[table].filter(hit).slice(0, limit));
   });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve({ requests, server, port: server.address().port }));
@@ -334,8 +375,12 @@ async function tool(port, args, input = '') {
   const { requests, server, port } = await startTables(tables);
 
   const listed = JSON.parse((await tool(port, ['list'])).out);
-  ok('the provider lists its four tools', listed.length === 4, JSON.stringify(listed.map((t) => t.name)));
-  ok('only queue_job says it acts', listed.filter((t) => t.acts).map((t) => t.name).join() === 'queue_job');
+  ok('the provider lists every tool it has',
+    listed.map((t) => t.name).join() === 'dashboard_status,job_details,list_projects,'
+      + 'queue_job,house_status,house_control',
+    JSON.stringify(listed.map((t) => t.name)));
+  ok('only the two that change something say they act',
+    listed.filter((t) => t.acts).map((t) => t.name).join() === 'queue_job,house_control');
 
   const status = await tool(port, ['call', 'dashboard_status'], '{}');
   has('the status says whether the PC runner is up', status.out, 'PC runner: online (desktop');
@@ -367,6 +412,233 @@ async function tool(port, args, input = '') {
   const none = await tool(port, ['call', 'list_projects'], '{}');
   ok('a table this account never made is "none yet", not a crash', none.code === 0, none.err);
   has('and says so', none.out, 'no projects listed yet');
+  server.close();
+}
+
+// ── 7. the house ──────────────────────────────────────────────────────
+// The hub is the one thing here that lives on another machine, so it gets a
+// stand-in too: a server that answers the four Home Assistant endpoints the
+// relay uses. Then the real bridge/house.mjs runs against it and the fake
+// PostgREST at once, and we read what it left in both.
+
+function startHub({ states, token = 'ha-token' }) {
+  const calls = [];
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://x');
+    const body = await new Promise((resolve) => {
+      let text = '';
+      req.on('data', (d) => { text += d; });
+      req.on('end', () => resolve(text ? JSON.parse(text) : null));
+    });
+    const send = (data, code = 200) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
+    if (req.headers.authorization !== `Bearer ${token}`) { send({ message: 'nope' }, 401); return; }
+
+    if (url.pathname === '/api/') { send({ message: 'API running.' }); return; }
+    if (url.pathname === '/api/config') {
+      send({ location_name: 'The flat', version: '2025.9.1', unit_system: { temperature: '°C' } });
+      return;
+    }
+    if (url.pathname === '/api/states') { send(states); return; }
+    if (url.pathname === '/api/template') {
+      // Home Assistant renders a template to plain text; ours asks for the
+      // room each entity is in, one per line.
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end(`${states.map((s) => `${s.entity_id}|${s.attributes.area ?? ''}`).join('\n')}\n`);
+      return;
+    }
+    if (url.pathname.startsWith('/api/states/')) {
+      const id = decodeURIComponent(url.pathname.replace('/api/states/', ''));
+      const found = states.find((s) => s.entity_id === id);
+      send(found ?? { message: 'not found' }, found ? 200 : 404);
+      return;
+    }
+    if (url.pathname.startsWith('/api/services/')) {
+      const [domain, service] = url.pathname.replace('/api/services/', '').split('/');
+      calls.push({ domain, service, data: body });
+      // The hub answers with what it changed, and then it has changed.
+      const hit = states.find((s) => s.entity_id === body.entity_id);
+      if (hit) hit.state = /off|close|lock$/.test(service) ? 'off' : 'on';
+      send(hit ? [hit] : []);
+      return;
+    }
+    send({ message: 'no such endpoint' }, 404);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ calls, server, port: server.address().port }));
+  });
+}
+
+const entity = (id, state, attributes = {}) => ({ entity_id: id, state, attributes });
+
+{
+  const states = [
+    entity('light.kitchen_ceiling', 'on', {
+      friendly_name: 'Kitchen ceiling', area: 'Kitchen',
+      brightness: 128, supported_color_modes: ['brightness'],
+    }),
+    entity('switch.kettle', 'off', { friendly_name: 'Kettle', area: 'Kitchen' }),
+    entity('climate.hall', 'heat', {
+      friendly_name: 'Hall thermostat', area: 'Hall',
+      current_temperature: 19.4, temperature: 20.5, hvac_action: 'heating',
+    }),
+    entity('lock.front_door', 'locked', { friendly_name: 'Front door', area: 'Hall' }),
+    entity('sensor.hall_temp', '19.4', {
+      friendly_name: 'Hall temperature', area: 'Hall',
+      device_class: 'temperature', unit_of_measurement: '°C',
+    }),
+    // The two a real install is full of and nobody wants a card for.
+    entity('sensor.phone_wifi', '-54', { friendly_name: 'Phone wifi', device_class: 'signal_strength' }),
+    entity('update.hub', 'off', { friendly_name: 'Hub update' }),
+  ];
+  const hub = await startHub({ states });
+
+  const tables = {
+    jobs: [{ id: 'a1', owner: 'u1', status: 'done' }],
+    house_devices: [
+      // Left over from a hub that no longer has it: the relay should drop it.
+      { owner: 'u1', entity_id: 'light.gone', name: 'Removed lamp', state: 'off' },
+    ],
+    house_hubs: [],
+    house_commands: [
+      { id: 1, owner: 'u1', entity_id: 'light.kitchen_ceiling', name: 'Kitchen ceiling',
+        action: 'off', value: null, source: 'dashboard', status: 'queued',
+        created_at: new Date().toISOString() },
+    ],
+  };
+  const { server, port } = await startTables(tables);
+
+  const env = bridgeEnv(port, null, {
+    HA_URL: `http://127.0.0.1:${hub.port}`,
+    HA_TOKEN: 'ha-token',
+    HA_NAME: 'the flat',
+  });
+
+  const run = (file, args = []) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [file, ...args], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    if (args[0] === 'call') child.stdin.end(args[2] ?? '{}');
+    else child.stdin.end('');
+    child.on('close', (code) => resolve({ out, err, code }));
+  });
+
+  const relay = await run('bridge/house.mjs', ['--once']);
+  ok('the house relay runs to the end', relay.code === 0, relay.err || relay.out);
+
+  const lamp = tables.house_devices.find((d) => d.entity_id === 'light.kitchen_ceiling');
+  ok('a light is mirrored with its room and its brightness as a percentage',
+    lamp?.area === 'Kitchen' && lamp.kind === 'light' && lamp.attrs.level === 50,
+    JSON.stringify(lamp));
+  // It started `on`; the queued tap turned it off, and the relay looked again
+  // rather than leaving the screen showing the state it just left behind.
+  ok('and re-read after obeying, so the card shows what actually happened',
+    lamp?.state === 'off' && lamp.is_on === false, JSON.stringify(lamp));
+  ok('a thermostat keeps both temperatures',
+    tables.house_devices.find((d) => d.entity_id === 'climate.hall')?.attrs.current_temperature === 19.4);
+  ok('a temperature sensor is worth a card',
+    tables.house_devices.some((d) => d.entity_id === 'sensor.hall_temp'));
+  ok('a wifi-strength sensor is not',
+    !tables.house_devices.some((d) => d.entity_id === 'sensor.phone_wifi'));
+  ok('and neither is a domain this app cannot draw',
+    !tables.house_devices.some((d) => d.entity_id === 'update.hub'));
+  ok('a device the hub no longer has is dropped',
+    !tables.house_devices.some((d) => d.entity_id === 'light.gone'),
+    JSON.stringify(tables.house_devices.map((d) => d.entity_id)));
+
+  ok('the hub heartbeat says it answered',
+    tables.house_hubs[0]?.reachable === true && tables.house_hubs[0]?.name === 'the flat'
+      && tables.house_hubs[0]?.owner === 'u1',
+    JSON.stringify(tables.house_hubs[0]));
+
+  const off = hub.calls.find((c) => c.service === 'turn_off');
+  ok('a queued tap becomes the Home Assistant call it means',
+    off?.domain === 'light' && off.data.entity_id === 'light.kitchen_ceiling',
+    JSON.stringify(hub.calls));
+  ok('and the command is closed as done',
+    tables.house_commands[0].status === 'done' && !tables.house_commands[0].error,
+    JSON.stringify(tables.house_commands[0]));
+
+  // ── the same house, as tools your assistant calls ──
+  const status = await run('bridge/tools.mjs', ['call', 'house_status', '{}']);
+  ok('house_status runs', status.code === 0, status.err);
+  has('it names the hub', status.out, 'the flat');
+  has('and groups by room', status.out, 'Hall');
+  has('and says what the thermostat is doing', status.out, 'set 20.5°');
+  has('and offers the rooms to ask about next', status.out, 'Rooms: Hall, Kitchen');
+
+  const room = await run('bridge/tools.mjs', ['call', 'house_status', '{"room":"kitchen"}']);
+  has('a room shows everything in it, on or off', room.out, 'Kettle');
+  ok('and nothing from another room', !room.out.includes('Front door'), room.out);
+
+  const before = hub.calls.length;
+  const control = await run('bridge/tools.mjs',
+    ['call', 'house_control', '{"device":"kitchen ceiling","action":"level","value":30}']);
+  ok('house_control runs', control.code === 0, control.err);
+  const dim = hub.calls.at(-1);
+  ok('a brightness becomes brightness_pct on the right entity',
+    hub.calls.length > before && dim.service === 'turn_on' && dim.data.brightness_pct === 30
+      && dim.data.entity_id === 'light.kitchen_ceiling',
+    JSON.stringify(dim));
+  ok('and the dashboard is told who did it',
+    tables.house_commands.some((c) => c.source === 'assistant' && c.action === 'level'
+      && Number(c.value) === 30 && c.status === 'done'),
+    JSON.stringify(tables.house_commands.map((c) => `${c.source}:${c.action}:${c.status}`)));
+
+  const nothing = hub.calls.length;
+  const wrong = await run('bridge/tools.mjs', ['call', 'house_control', '{"device":"kitchn","action":"on"}']);
+  ok('a name that matches nothing changes nothing',
+    wrong.code === 1 && hub.calls.length === nothing, wrong.out);
+  has('and says what it does have', wrong.err, 'Did you mean');
+
+  const locked = await run('bridge/tools.mjs', ['call', 'house_control', '{"device":"front door","action":"level","value":50}']);
+  ok('an action a device cannot do is refused rather than posted',
+    locked.code === 1 && !hub.calls.some((c) => c.domain === 'lock' && c.service === 'turn_on'),
+    locked.out);
+
+  // "Turn off the kitchen" means its lights — never the kettle.
+  const kettleBefore = hub.calls.filter((c) => c.data.entity_id === 'switch.kettle').length;
+  await run('bridge/tools.mjs', ['call', 'house_control', '{"room":"kitchen","action":"off"}']);
+  ok('a bare room means its lights, not everything plugged in',
+    hub.calls.filter((c) => c.data.entity_id === 'switch.kettle').length === kettleBefore,
+    JSON.stringify(hub.calls.map((c) => c.data.entity_id)));
+
+  hub.server.close();
+  server.close();
+}
+
+{
+  // The hub being off is the ordinary case, not a crash: the relay says so
+  // in the heartbeat and leaves the mirror alone, so the screen can tell
+  // "your PC is asleep" from "the Pi did not answer".
+  const tables = {
+    jobs: [{ id: 'a1', owner: 'u1', status: 'done' }],
+    house_devices: [], house_hubs: [], house_commands: [],
+  };
+  const { server, port } = await startTables(tables);
+  const dead = await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['bridge/house.mjs', '--once'], {
+      cwd: root,
+      // Port 1 is never listening, and the timeout keeps the test honest.
+      env: bridgeEnv(port, null, {
+        HA_URL: 'http://127.0.0.1:1', HA_TOKEN: 'x', HA_TIMEOUT_MS: '1200', HA_NAME: 'the flat',
+      }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (code) => resolve({ out, code }));
+  });
+  ok('a hub that is off does not take the relay down with it', dead.code === 0, dead.out);
+  has('and it says so in the log', dead.out, 'hub unreachable');
+  ok('the heartbeat records the hub as unreachable, with why',
+    tables.house_hubs[0]?.reachable === false && /unreachable/.test(tables.house_hubs[0]?.error ?? ''),
+    JSON.stringify(tables.house_hubs[0]));
   server.close();
 }
 

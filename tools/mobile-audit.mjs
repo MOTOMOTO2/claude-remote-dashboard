@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const root = new URL('..', import.meta.url);
 const dir = fileURLToPath(root);
 
-const VIEWS = ['home', 'agents', 'ask', 'chat', 'new', 'ideas', 'projects', 'auth'];
+const VIEWS = ['home', 'agents', 'ask', 'house', 'chat', 'new', 'ideas', 'projects', 'auth'];
 
 /** Any of the browsers a box with Playwright, Chrome or Edge already has. */
 function findBrowser() {

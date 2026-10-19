@@ -111,3 +111,95 @@ alter table settings enable row level security;
 drop policy if exists "own settings" on settings;
 create policy "own settings" on settings
   for all using (auth.uid() = owner) with check (auth.uid() = owner);
+
+-- ── your house ────────────────────────────────────────────────────────
+-- The smart home hub on your Pi is on your LAN and your phone is not, so
+-- the house takes the same road as everything else here: the bridge on your
+-- PC mirrors what the hub can see into `house_devices`, and claims the taps
+-- you make from `house_commands`. Nothing is exposed to the internet, no
+-- port is opened, and the hub's token never leaves the PC.
+
+-- One row per device the hub reports, rewritten only when it changes.
+create table if not exists house_devices (
+  owner      uuid not null references auth.users on delete cascade,
+  entity_id  text not null,
+  name       text not null default '',
+  area       text,
+  kind       text not null default 'other',
+  state      text not null default '',
+  is_on      boolean not null default false,
+  attrs      jsonb  not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (owner, entity_id)
+);
+
+create index if not exists house_devices_room on house_devices (owner, area, kind);
+
+alter table house_devices enable row level security;
+
+drop policy if exists "own devices" on house_devices;
+create policy "own devices" on house_devices
+  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+
+-- What is relaying, and whether the hub behind it answered. Two different
+-- failures — your PC asleep, or the Pi off — and the screen says which.
+create table if not exists house_hubs (
+  owner     uuid primary key references auth.users on delete cascade,
+  name      text not null,
+  kind      text,
+  devices   int  not null default 0,
+  reachable boolean not null default false,
+  error     text,
+  last_seen timestamptz not null default now()
+);
+
+alter table house_hubs enable row level security;
+
+drop policy if exists "own hub" on house_hubs;
+create policy "own hub" on house_hubs
+  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+
+-- A tap, written `queued` and claimed by the relay. The same table is the
+-- activity list, which is why a finished command is kept rather than
+-- deleted — and why `source` says whether you or your assistant did it.
+create table if not exists house_commands (
+  id         bigserial primary key,
+  owner      uuid not null references auth.users on delete cascade,
+  entity_id  text not null,
+  name       text,
+  action     text not null,
+  value      numeric,
+  source     text not null default 'dashboard',
+  status     text not null default 'queued'
+             check (status in ('queued', 'running', 'done', 'error')),
+  error      text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- The one query the relay runs on a loop, and the one the dashboard draws.
+create index if not exists house_commands_waiting on house_commands (status, created_at)
+  where status in ('queued', 'running');
+create index if not exists house_commands_recent on house_commands (owner, created_at desc);
+
+alter table house_commands enable row level security;
+
+drop policy if exists "own commands" on house_commands;
+create policy "own commands" on house_commands
+  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+
+do $$
+begin
+  alter publication supabase_realtime add table house_devices;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table house_commands;
+exception when duplicate_object then null;
+end $$;
+
+-- A device changing is an UPDATE, and the dashboard needs the whole row.
+alter table house_devices replica identity full;
+alter table house_commands replica identity full;

@@ -1,9 +1,10 @@
-// Hash routing. Eight places to be:
+// Hash routing. Nine places to be:
 //   #/            home
 //   #/p/<slug>    one project's chat
 //   #/j/<id>      a brand-new job, until the host names its project
 //   #/new         start a project
 //   #/agents      every agent at once: slots, what's running, what's waiting
+//   #/house       your smart home hub, room by room
 //   #/ask         your own assistant — the newest conversation
 //   #/ask/<id>    one conversation with it
 //   #/projects    everything you have, and where each one is live
@@ -20,6 +21,7 @@ export function readHash() {
   if (h.startsWith('j/')) return at('pending', { jobId: h.slice(2) });
   if (h.startsWith('ask/')) return at('ask', { chatId: decodeURIComponent(h.slice(4)) });
   if (h === 'ask') return at('ask');
+  if (h === 'house') return at('house');
   if (h === 'new') return at('new');
   if (h === 'ideas') return at('ideas');
   if (h === 'agents') return at('agents');

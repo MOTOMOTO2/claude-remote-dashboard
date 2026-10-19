@@ -12,61 +12,18 @@
 // under row-level security — so it can see and do what you can from the
 // dashboard and nothing more. One tool acts (queue_job); the rest only read.
 
-import { readFileSync } from 'node:fs';
+import { loadDotEnv, connect } from './env.mjs';
+import * as ha from './ha.mjs';
+import {
+  kindOf, isOn, isAway, isControllable, stateWord, detailLine, rooms, summary,
+  isAction, clampValue, commandLabel, ACTIONS,
+} from '../house.js';
 
-function loadDotEnv(path = new URL('.env', import.meta.url)) {
-  let text;
-  try { text = readFileSync(path, 'utf8'); } catch { return; }
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/i);
-    if (!m) continue;
-    const value = m[2].replace(/^(['"])(.*)\1$/, '$2');
-    if (process.env[m[1]] === undefined) process.env[m[1]] = value;
-  }
-}
 loadDotEnv();
 
-const env = process.env;
-const url = (env.SUPABASE_URL ?? '').replace(/\/+$/, '');
-const serviceKey = env.SUPABASE_SERVICE_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-const key = serviceKey || env.SUPABASE_ANON_KEY || env.SUPABASE_KEY || '';
-
-let token = '';
-let owner = env.OWNER_ID ?? '';
-
-async function signIn() {
-  if (!url || !key) throw new Error('bridge/.env has no SUPABASE_URL and key — run npm run bridge:setup.');
-  if (serviceKey) return;
-  const res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
-    method: 'POST',
-    headers: { apikey: key, 'content-type': 'application/json' },
-    body: JSON.stringify({ email: env.SUPABASE_EMAIL, password: env.SUPABASE_PASSWORD }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Sign-in failed: ${body.error_description ?? body.msg ?? res.status}`);
-  token = body.access_token;
-  owner = body.user?.id ?? owner;
-}
-
-async function api(path, { method = 'GET', body, prefer } = {}) {
-  const res = await fetch(`${url}/rest/v1${path}`, {
-    method,
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${token || key}`,
-      'content-type': 'application/json',
-      ...(prefer ? { prefer } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    // A table this account never made is "not set up", not a crash.
-    if (/PGRST205|does not exist/.test(text)) return null;
-    throw new Error(`${method} ${path.split('?')[0]} → ${res.status} ${text.slice(0, 200)}`);
-  }
-  return text ? JSON.parse(text) : null;
-}
+const sb = connect();
+const { api } = sb;
+const signIn = () => sb.signIn();
 
 // ── wording ───────────────────────────────────────────────────────────
 
@@ -214,7 +171,7 @@ const TOOLS = {
         method: 'POST',
         prefer: 'return=representation',
         body: {
-          owner,
+          owner: sb.owner,
           prompt: text,
           mode: slug ? 'existing' : 'new',
           project_slug: slug,
@@ -229,7 +186,249 @@ const TOOLS = {
         + 'It is on the dashboard now and starts when the PC runner picks it up.';
     },
   },
+
+  house_status: {
+    description: 'The smart home hub: which lights and switches are on, how warm each room is, '
+      + 'and whether doors and locks are shut. Give a room or a kind to see everything in it; '
+      + 'with neither, it reports what is on and what is worth knowing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        room: { type: 'string', description: 'A room name, e.g. "kitchen". Optional.' },
+        kind: { type: 'string', description: 'light, switch, fan, climate, cover, lock, media_player, sensor. Optional.' },
+      },
+    },
+    note: 'looking at the house',
+    async run({ room, kind } = {}) {
+      const { devices, from } = await readHouse();
+      if (!devices.length) return houseMissing(from);
+      const narrow = Boolean(room || kind);
+      const picked = findDevices(devices, { room, kind });
+      if (narrow && !picked.length) {
+        return `Nothing in the house matches${room ? ` room "${room}"` : ''}`
+          + `${kind ? ` kind "${kind}"` : ''}. Rooms: ${roomNames(devices).join(', ') || 'none set'}.`;
+      }
+
+      const s = summary(devices);
+      const head = `${from} · ${s.devices} devices. ${s.sentence}.`
+        + (s.away ? ` ${s.away} not answering.` : '');
+      const out = [head, ''];
+
+      for (const r of rooms(narrow ? picked : devices)) {
+        // Unfiltered, a house of 200 devices is unreadable: say what is on
+        // and what is being measured, and let a follow-up ask for a room.
+        const show = narrow ? r.devices : r.devices.filter(worthSaying);
+        if (!show.length) continue;
+        out.push(`${r.area}${r.on ? ` — ${r.on} on` : ''}`);
+        for (const d of show.slice(0, 60)) out.push(`  ${describe(d)}`);
+      }
+      if (!narrow) {
+        out.push('', `Rooms: ${roomNames(devices).join(', ') || 'none set'}. `
+          + 'Ask again with a room to see everything in it.');
+      }
+      return out.join('\n');
+    },
+  },
+
+  house_control: {
+    description: 'Switch something in the house on or off, lock or unlock it, open or close it, '
+      + 'dim a light, or set a thermostat. Only when the user\'s latest message asks for it. '
+      + 'Name the device, or give a room (and optionally a kind) to act on all of them at once.',
+    parameters: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ACTIONS, description: 'on, off, toggle, open, close, stop, lock, unlock, run, level, temperature.' },
+        device: { type: 'string', description: 'What to act on, as the hub names it, e.g. "kitchen ceiling".' },
+        room: { type: 'string', description: 'A room, to act on everything in it. Defaults to lights unless a kind is given.' },
+        kind: { type: 'string', description: 'Narrow a room to light, switch, fan, climate, cover, lock or media_player.' },
+        value: { type: 'number', description: 'Brightness 0-100 for "level", degrees for "temperature".' },
+      },
+    },
+    acts: true,
+    note: 'changing something in the house',
+    async run({ action, device, room, kind, value } = {}) {
+      const act = String(action ?? '').toLowerCase();
+      if (!isAction(act)) throw new Error(`"${action}" is not something I can do. Try: ${ACTIONS.join(', ')}.`);
+      if (!device && !room) throw new Error('Say what to change: a device name, or a room.');
+      if ((act === 'level' || act === 'temperature') && clampValue(act, value) == null) {
+        throw new Error(`"${act}" needs a number — 0-100 for level, degrees for temperature.`);
+      }
+      if (!ha.configured()) {
+        throw new Error('This PC has no hub configured. Set HA_URL and HA_TOKEN in bridge/.env.');
+      }
+
+      const { devices } = await readHouse();
+      if (!devices.length) throw new Error(houseMissing('the hub'));
+
+      // A bare room means the lights: "turn off the kitchen" never means the
+      // fridge, and acting on everything in a room would be a nasty surprise.
+      const assumed = !device && room && !kind && act !== 'run' ? 'light' : kind;
+      let targets = findDevices(devices, { device, room, kind: assumed });
+      targets = targets.filter((d) => !isAway(d));
+
+      if (!targets.length) {
+        // A near miss is worth naming, and so is a total miss: a small model
+        // given nothing to go on will invent a device name and try again.
+        const near = findDevices(devices, { device }).map((d) => d.name);
+        const some = (near.length ? near : devices.filter(isControllable).map((d) => d.name))
+          .slice(0, 6);
+        throw new Error(`Nothing here matches ${device ? `"${device}"` : `room "${room}"`}`
+          + `${assumed ? ` (${assumed}s)` : ''}.`
+          + `${some.length ? ` Did you mean: ${some.join(', ')}?` : ''}`);
+      }
+      // Several things with one name is fine when they are the same sort of
+      // thing ("the kitchen lights"); mixing a lamp and a lock is not.
+      const kinds = new Set(targets.map(kindOf));
+      if (targets.length > 1 && kinds.size > 1) {
+        throw new Error(`"${device ?? room}" matches ${targets.length} different kinds of thing `
+          + `(${[...kinds].join(', ')}). Say which, or add a kind.`);
+      }
+      if (targets.length > 12) {
+        throw new Error(`That would change ${targets.length} things at once. Narrow it down.`);
+      }
+
+      const done = [];
+      const failed = [];
+      for (const d of targets) {
+        const cmd = { entity_id: d.entity_id, action: act, value: value ?? null, name: d.name };
+        try {
+          await ha.call(cmd);
+          done.push(d);
+          await record(cmd, { status: 'done' });
+        } catch (e) {
+          failed.push(`${d.name}: ${e.message}`);
+          await record(cmd, { status: 'error', error: e.message });
+        }
+      }
+
+      // Nothing changed at all is a failure, not a report: say so loudly
+      // enough that the next attempt is a different one.
+      if (!done.length) throw new Error(failed.join('; '));
+
+      const what = commandLabel({ action: act, value, name: done.map((d) => d.name).join(', ') });
+      const after = await settled(done);
+      return [
+        done.length ? `Done — ${what}.` : 'Nothing changed.',
+        after,
+        failed.length ? `Failed: ${failed.join('; ')}` : '',
+        assumed === 'light' && !kind ? '(Took "the room" to mean its lights.)' : '',
+      ].filter(Boolean).join('\n');
+    },
+  },
 };
+
+// ── the house, for the two tools above ────────────────────────────────
+
+const norm = (s) => String(s ?? '').toLowerCase().replace(/[_.\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** What people call the kinds, as the kinds house.js uses. */
+const KIND_WORDS = {
+  light: 'light', lights: 'light', lamp: 'light', lamps: 'light', bulb: 'light',
+  switch: 'switch', switches: 'switch', plug: 'switch', socket: 'switch',
+  fan: 'fan', fans: 'fan',
+  climate: 'climate', thermostat: 'climate', heating: 'climate', heater: 'climate',
+  cover: 'cover', covers: 'cover', blind: 'cover', blinds: 'cover', curtain: 'cover',
+  curtains: 'cover', shutter: 'cover', garage: 'cover',
+  lock: 'lock', locks: 'lock', door: 'lock',
+  media_player: 'media_player', media: 'media_player', speaker: 'media_player', tv: 'media_player',
+  scene: 'scene', scenes: 'scene', script: 'script', scripts: 'script',
+  sensor: 'sensor', sensors: 'sensor', reading: 'sensor', readings: 'sensor',
+  binary_sensor: 'binary_sensor', contact: 'binary_sensor', motion: 'binary_sensor',
+};
+
+const askedKind = (kind) => KIND_WORDS[norm(kind).replace(/ /g, '_')] ?? KIND_WORDS[norm(kind)] ?? null;
+
+/**
+ * The hub first, the mirror second. Your assistant runs on the same PC as
+ * the relay, so asking the hub directly is both faster and fresher — but a
+ * PC where only the dashboard is set up can still answer from the table.
+ */
+async function readHouse() {
+  if (ha.configured()) {
+    try {
+      return { devices: await ha.devices(), from: ha.config().name };
+    } catch (e) {
+      const rows = await api('/house_devices?select=*&limit=400').catch(() => null);
+      if (rows?.length) return { devices: rows, from: `the dashboard's last look (the hub itself: ${e.message})` };
+      throw e;
+    }
+  }
+  const rows = await api('/house_devices?select=*&limit=400').catch(() => null);
+  return { devices: rows ?? [], from: "the dashboard's copy" };
+}
+
+const houseMissing = (from) => `No smart home devices are known yet (${from}). `
+  + 'Set HA_URL and HA_TOKEN in bridge/.env and run: node bridge/house.mjs --try';
+
+const roomNames = (devices) =>
+  [...new Set(devices.map((d) => d.area).filter(Boolean))].sort();
+
+/** Unfiltered, only say the things someone would actually want told. */
+const worthSaying = (d) => {
+  const k = kindOf(d);
+  if (isAway(d)) return false;
+  if (k === 'sensor' || k === 'climate' || k === 'lock') return true;
+  if (k === 'scene' || k === 'script') return false;
+  return isOn(d);
+};
+
+const describe = (d) => {
+  const detail = detailLine(d);
+  return `- ${d.name} (${kindOf(d)}): ${stateWord(d)}${detail ? ` · ${detail}` : ''}`;
+};
+
+function findDevices(all, { device, room, kind } = {}) {
+  let pool = all;
+  const want = kind ? askedKind(kind) : null;
+  if (want) pool = pool.filter((d) => kindOf(d) === want);
+  if (room) {
+    const r = norm(room);
+    pool = pool.filter((d) => norm(d.area).includes(r) || r.includes(norm(d.area) || '\u0000'));
+  }
+  if (!device) return pool;
+
+  const q = norm(device);
+  const exact = pool.filter((d) => norm(d.name) === q || norm(d.entity_id) === q);
+  if (exact.length) return exact;
+  const starts = pool.filter((d) => norm(d.name).startsWith(q));
+  if (starts.length) return starts;
+  // Every word somewhere in the name, room or id: "kitchen lights" finds the
+  // two bulbs the hub calls "Kitchen ceiling" and "Kitchen under-cupboard".
+  const words = q.split(' ').filter(Boolean);
+  const hay = (d) => `${norm(d.name)} ${norm(d.area)} ${norm(d.entity_id)} ${kindOf(d)}s`;
+  return pool.filter((d) => words.every((w) => hay(d).includes(w)));
+}
+
+/** Put it on the dashboard's activity list too, so the house has one story. */
+const record = (cmd, { status, error = null }) =>
+  api('/house_commands', {
+    method: 'POST',
+    prefer: 'return=minimal',
+    body: {
+      owner: sb.owner,
+      entity_id: cmd.entity_id,
+      name: cmd.name ?? null,
+      action: cmd.action,
+      value: cmd.value ?? null,
+      source: 'assistant',
+      status,
+      error: error ? String(error).slice(0, 300) : null,
+      updated_at: new Date().toISOString(),
+    },
+  }).catch(() => null);
+
+/** Read back what actually happened — a hub can refuse politely. */
+async function settled(devices) {
+  if (!devices.length) return '';
+  await new Promise((r) => setTimeout(r, 900));
+  const lines = [];
+  for (const d of devices.slice(0, 6)) {
+    const now = await ha.stateOf(d.entity_id).catch(() => null);
+    if (now) lines.push(describe(ha.toDevice(now, new Map([[d.entity_id, d.area]]))));
+  }
+  return lines.join('\n');
+}
 
 // ── the protocol ──────────────────────────────────────────────────────
 

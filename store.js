@@ -5,6 +5,10 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { fleet, clampSlots, DEFAULT_SLOTS } from './fleet.js';
 import { conversations, presence, isPending, pendingQueue } from './assistant.js';
+import {
+  hubPresence, hubState, rooms as houseRooms, summary as houseSummary,
+  pendingBy, isQueued, recent as recentCommands, litLights,
+} from './house.js';
 
 const cfg = window.CONFIG ?? {};
 
@@ -48,6 +52,12 @@ export const state = {
   /** Whether the chat tables are there at all, and why not if they aren't. */
   askReady: false,
   askError: null,
+  /** Your house: every device the hub reports, the relay, and taps in flight. */
+  devices: [],
+  hub: null,
+  commands: [],
+  houseReady: false,
+  houseError: null,
   realtime: 'connecting',
   loading: true,
 };
@@ -84,7 +94,7 @@ export const projectGone = (slug) =>
 
 // ── change notification ───────────────────────────────────────────────
 
-const listeners = { change: [], event: [], finish: [], reply: [] };
+const listeners = { change: [], event: [], finish: [], reply: [], houseFail: [] };
 
 export const on = (name, fn) => { listeners[name].push(fn); };
 const emit = (name, arg) => { for (const fn of listeners[name]) fn(arg); };
@@ -347,6 +357,33 @@ export function subscribe() {
         })
       .subscribe(),
 
+    // Your house. A device changing is an UPDATE to one row, so this is what
+    // makes a light you switched somewhere else in the flat show up here
+    // without a refresh; `pollHouse` covers the publication not having it.
+    sb.channel('house-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'house_devices' },
+        ({ new: row, old, eventType }) => {
+          if (eventType === 'DELETE' || (!row?.entity_id && old?.entity_id)) {
+            state.devices = state.devices.filter((d) => d.entity_id !== old?.entity_id);
+          } else {
+            takeDevice(row);
+          }
+          changed();
+        })
+      .subscribe(),
+
+    sb.channel('house-commands-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'house_commands' },
+        ({ new: row, old, eventType }) => {
+          if (eventType === 'DELETE' || (!row?.id && old?.id)) {
+            state.commands = state.commands.filter((c) => String(c.id) !== String(old?.id));
+          } else {
+            takeCommand(row);
+          }
+          changed();
+        })
+      .subscribe(),
+
     sb.channel('chats-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' },
         ({ new: row, old, eventType }) => {
@@ -578,4 +615,122 @@ export async function deleteConversation(id) {
     changed();
   }
   return res;
+}
+
+// ── your house ────────────────────────────────────────────────────────
+// The third thing this app relays, and the one with the shortest round
+// trip: a tap writes a row into `house_commands`, the bridge on your PC
+// claims it, calls the hub on your own network, and the device it changed
+// comes back in `house_devices` a second later.
+//
+// Optional like the rest. An account whose schema predates these tables
+// still works — the House screen says the migration hasn't run.
+
+const DEVICE_LIMIT = 400;
+
+const devicesQuery = () => sb.from('house_devices').select('*').limit(DEVICE_LIMIT);
+const hubQuery = () => sb.from('house_hubs').select('*')
+  .order('last_seen', { ascending: false }).limit(1);
+const commandsQuery = (n = 60) => sb.from('house_commands').select('*')
+  .order('id', { ascending: false }).limit(n);
+
+/** Read the house. Three small tables, all of them optional. */
+export async function loadHouse() {
+  const [devRes, hubRes, cmdRes] = await Promise.all([
+    devicesQuery(), hubQuery(), commandsQuery(),
+  ]);
+
+  if (devRes.error) {
+    state.houseReady = false;
+    state.houseError = devRes.error.message ?? 'unavailable';
+  } else {
+    state.houseReady = true;
+    state.houseError = null;
+    state.devices = devRes.data ?? [];
+    state.commands = cmdRes.error ? [] : (cmdRes.data ?? []);
+  }
+  // No hub row simply means nothing has checked in, which the screen says
+  // for itself — it is not an error worth colouring the page over.
+  state.hub = hubRes.error ? null : (hubRes.data?.[0] ?? null);
+  changed();
+}
+
+/** Is the relay there? One row, so it rides the same ten-second timer. */
+export async function pollHub() {
+  const { data, error } = await hubQuery();
+  if (!error) state.hub = data?.[0] ?? null;
+  changed();
+}
+
+/**
+ * Re-read devices and taps. Only runs while something is actually in flight
+ * — the app starts and stops it — because it is the net under realtime for
+ * the same reason the reply poll is: an UPDATE only reaches us if the table
+ * is in the Supabase publication.
+ */
+export async function pollHouse() {
+  const [devRes, cmdRes] = await Promise.all([devicesQuery(), commandsQuery(30)]);
+  if (!devRes.error) state.devices = devRes.data ?? [];
+  if (!cmdRes.error) for (const row of cmdRes.data ?? []) takeCommand(row);
+  changed();
+}
+
+function takeDevice(row) {
+  if (!row?.entity_id) return;
+  const i = state.devices.findIndex((d) => d.entity_id === row.entity_id);
+  if (i < 0) state.devices.push(row);
+  else state.devices[i] = { ...state.devices[i], ...row };
+}
+
+function takeCommand(row) {
+  if (!row?.id) return;
+  const i = state.commands.findIndex((c) => String(c.id) === String(row.id));
+  const before = i < 0 ? null : state.commands[i];
+  if (i < 0) state.commands.unshift(row);
+  else state.commands[i] = { ...before, ...row };
+  // A tap that did not land has to say so: the device simply staying as it
+  // was looks exactly like a tap that never registered.
+  if (row.status === 'error' && before?.status !== 'error') emit('houseFail', row);
+}
+
+export const houseDevices = () => state.devices;
+export const houseRoomList = () => houseRooms(state.devices);
+export const houseSummaryNow = () => houseSummary(state.devices);
+export const housePresence = () => hubPresence(state.hub);
+export const houseState = () => hubState(housePresence());
+export const housePending = () => pendingBy(state.commands);
+export const houseBusy = () => state.commands.filter(isQueued);
+export const houseRecent = (n) => recentCommands(state.commands, n);
+export const litLightsNow = () => litLights(state.devices);
+export const deviceOf = (entityId) =>
+  state.devices.find((d) => d.entity_id === entityId) ?? null;
+
+/**
+ * Tap something. The row is the instruction *and* the receipt: it shows up
+ * on the screen as "turning off…" the moment it is written, and the relay
+ * fills in what became of it. Several devices at once (a room, or "all
+ * lights off") is one row each, so each can fail on its own.
+ */
+export async function sendCommand(commands) {
+  const list = (Array.isArray(commands) ? commands : [commands]).filter(Boolean);
+  if (!list.length) return { error: null, rows: [] };
+
+  const { data: { user } } = await sb.auth.getUser();
+  const at = now();
+  const res = await sb.from('house_commands').insert(list.map((c) => ({
+    owner: user?.id,
+    entity_id: c.entity_id,
+    name: c.name ?? deviceOf(c.entity_id)?.name ?? null,
+    action: c.action,
+    value: c.value ?? null,
+    source: 'dashboard',
+    status: 'queued',
+    created_at: at,
+    updated_at: at,
+  }))).select('*');
+
+  // Show it immediately rather than waiting for the realtime echo.
+  for (const row of res.data ?? []) takeCommand(row);
+  changed();
+  return { error: res.error ?? null, rows: res.data ?? [] };
 }

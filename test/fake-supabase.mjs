@@ -8,6 +8,7 @@ export const fake = {
   tables: {
     jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
     chats: [], chat_messages: [], assistants: [],
+    house_devices: [], house_hubs: [], house_commands: [],
   },
   /** table -> error, so a read can be made to fail the way a real one does. */
   failures: {},
@@ -22,6 +23,7 @@ export const fake = {
     this.tables = {
       jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
     chats: [], chat_messages: [], assistants: [],
+    house_devices: [], house_hubs: [], house_commands: [],
     };
     this.failures = {};
     this.inserts = [];
@@ -101,13 +103,19 @@ class Query {
     return this;
   }
 
-  insert(row) {
+  /** One row, or several — a room's worth of taps goes in as an array. */
+  insert(rows) {
     this.mode = 'insert';
-    const stored = { id: `new-${fake.inserts.length + 1}`, status: 'queued', ...row };
-    fake.inserts.push(stored);
-    fake.tables[this.table].push(stored);
-    this.rows = [stored];
-    Promise.resolve().then(() => fake.emit(this.table, 'INSERT', stored));
+    const list = (Array.isArray(rows) ? rows : [rows]).map((row) => {
+      const stored = { id: `new-${fake.inserts.length + 1}`, status: 'queued', ...row };
+      fake.inserts.push(stored);
+      (fake.tables[this.table] ??= []).push(stored);
+      return stored;
+    });
+    this.rows = list;
+    Promise.resolve().then(() => {
+      for (const stored of list) fake.emit(this.table, 'INSERT', stored);
+    });
     return this;
   }
 

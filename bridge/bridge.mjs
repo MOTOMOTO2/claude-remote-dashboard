@@ -26,26 +26,23 @@
 //   ASSISTANT_CMD=python C:\ai\jarvis.py
 //   ASSISTANT_URL=http://127.0.0.1:11434/api/chat
 //
+// Your smart home hub rides along in the same process, if you point it at
+// one — see bridge/house.mjs:
+//
+//   HA_URL=http://homeassistant.local:8123
+//   HA_TOKEN=...
+//
 // Optional: ASSISTANT_NAME (defaults to this computer's name), ASSISTANT_MODEL
 // (shown in the dashboard), ASSISTANT_HEADERS (JSON, sent with ASSISTANT_URL).
 
-import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { answerWith } from './reply.mjs';
+import { loadDotEnv } from './env.mjs';
+import { startHouse } from './house.mjs';
+import * as ha from './ha.mjs';
 
 // ── configuration ─────────────────────────────────────────────────────
 
-/** A .env next to this file, if you would rather not export variables. */
-function loadDotEnv(path = new URL('.env', import.meta.url)) {
-  let text;
-  try { text = readFileSync(path, 'utf8'); } catch { return; }
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/i);
-    if (!m) continue;
-    const value = m[2].replace(/^(['"])(.*)\1$/, '$2');
-    if (process.env[m[1]] === undefined) process.env[m[1]] = value;
-  }
-}
 loadDotEnv();
 
 const env = process.env;
@@ -107,9 +104,14 @@ if (tryAt >= 0) {
 // request, and a dependency-free script is one less thing to keep current.
 
 if (!CONFIG.url) die('SUPABASE_URL is not set. See the comment at the top of this file.');
-if (!answer) {
-  die('Neither ASSISTANT_CMD nor ASSISTANT_URL is set, so there is nothing to ask.\n'
-    + '  Try: ASSISTANT_CMD="python my_ai.py" node bridge/bridge.mjs --try "hello"');
+// Two relays share this process: your assistant, and your house. Either one
+// on its own is a reason to be running — only neither is a mistake.
+if (!answer && !ha.configured()) {
+  die('Nothing is configured to relay.\n'
+    + '  For your assistant, set ASSISTANT_CMD or ASSISTANT_URL:\n'
+    + '    ASSISTANT_CMD="python my_ai.py" node bridge/bridge.mjs --try "hello"\n'
+    + '  For your smart home hub, set HA_URL and HA_TOKEN:\n'
+    + '    node bridge/house.mjs --try');
 }
 
 const rest = `${CONFIG.url}/rest/v1`;
@@ -167,7 +169,7 @@ async function api(path, { method = 'GET', body, prefer, retry = true } = {}) {
  */
 async function findOwner() {
   if (owner) return owner;
-  for (const table of ['chats', 'jobs', 'chat_messages']) {
+  for (const table of ['chats', 'jobs', 'chat_messages', 'house_devices']) {
     const rows = await api(`/${table}?select=owner&limit=1`).catch(() => null);
     if (rows?.[0]?.owner) return rows[0].owner;
   }
@@ -291,15 +293,30 @@ await signIn();
 owner = await findOwner();
 
 log(`bridge up as "${CONFIG.name}"${CONFIG.model ? ` (${CONFIG.model})` : ''}`);
-log(`asking: ${CONFIG.cmd || CONFIG.endpoint}`);
-await beat();
+if (answer) log(`asking: ${CONFIG.cmd || CONFIG.endpoint}`);
+if (answer) await beat();
 
 const once = args.includes('--once');
-if (!once) setInterval(beat, BEAT_MS).unref?.();
+if (!once && answer) setInterval(beat, BEAT_MS).unref?.();
+
+// The house rides along in the same process, so one thing to start on the PC
+// covers both and the logon task needs no changes. It keeps its own clock:
+// mirroring the hub must not wait behind a long answer.
+const house = ha.configured()
+  ? startHouse({ api, owner, log: (...a) => log('house:', ...a), once })
+  : null;
+if (house) log(`house relay on ${ha.config().url}`);
+else if (!answer) log('nothing to relay — set ASSISTANT_CMD or HA_URL');
 
 // One message at a time on purpose: your assistant is one process on one
 // machine, and two answers streaming at once would only fight over it.
 for (;;) {
+  if (!answer) {                       // a house-only bridge: nothing to claim
+    if (once) break;
+    await sleep(IDLE_MS);
+    continue;
+  }
+
   let row = null;
   try {
     row = await claim();
@@ -315,4 +332,5 @@ for (;;) {
   if (!row) await sleep(IDLE_MS);
 }
 
+if (house) await house.done;
 process.exit(0);

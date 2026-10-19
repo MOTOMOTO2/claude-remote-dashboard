@@ -101,6 +101,41 @@ export function seed() {
       text: 'Power-cycle it, then re-add it over IP rather than USB.' },
   ];
 
+  // Your house: a hub that is answering, two rooms with something on, a
+  // thermostat, a door contact, a scene, and one bulb that has dropped off
+  // the network — the states the screen has to tell apart.
+  fake.tables.house_hubs = [{
+    owner: 'u1', name: 'home assistant', kind: 'home-assistant',
+    devices: 8, reachable: true, error: null, last_seen: new Date().toISOString(),
+  }];
+
+  fake.tables.house_devices = [
+    { owner: 'u1', entity_id: 'light.kitchen_ceiling', name: 'Kitchen ceiling', area: 'Kitchen',
+      kind: 'light', state: 'on', is_on: true, attrs: { level: 80, dimmable: true }, updated_at: iso(1) },
+    { owner: 'u1', entity_id: 'light.kitchen_under', name: 'Under cupboard', area: 'Kitchen',
+      kind: 'light', state: 'off', is_on: false, attrs: { dimmable: true }, updated_at: iso(9) },
+    { owner: 'u1', entity_id: 'switch.kettle', name: 'Kettle', area: 'Kitchen',
+      kind: 'switch', state: 'off', is_on: false, attrs: {}, updated_at: iso(30) },
+    { owner: 'u1', entity_id: 'light.<script>alert(1)</script>', name: 'Bad <b>lamp</b>',
+      area: 'Living room', kind: 'light', state: 'unavailable', is_on: false, attrs: {}, updated_at: iso(200) },
+    { owner: 'u1', entity_id: 'climate.hall', name: 'Hall thermostat', area: 'Hall',
+      kind: 'climate', state: 'heat', is_on: true,
+      attrs: { current_temperature: 19.4, temperature: 20.5, hvac_action: 'heating' }, updated_at: iso(2) },
+    { owner: 'u1', entity_id: 'lock.front_door', name: 'Front door', area: 'Hall',
+      kind: 'lock', state: 'locked', is_on: false, attrs: {}, updated_at: iso(120) },
+    { owner: 'u1', entity_id: 'binary_sensor.back_door', name: 'Back door', area: 'Hall',
+      kind: 'binary_sensor', state: 'off', is_on: false, attrs: { device_class: 'door' }, updated_at: iso(300) },
+    { owner: 'u1', entity_id: 'scene.movie_night', name: 'Movie night', area: null,
+      kind: 'scene', state: 'unknown', is_on: false, attrs: {}, updated_at: iso(900) },
+  ];
+
+  fake.tables.house_commands = [
+    { id: 1, owner: 'u1', entity_id: 'light.kitchen_ceiling', name: 'Kitchen ceiling',
+      action: 'on', value: null, source: 'dashboard', status: 'done', created_at: iso(3) },
+    { id: 2, owner: 'u1', entity_id: 'climate.hall', name: 'Hall thermostat',
+      action: 'temperature', value: 20.5, source: 'assistant', status: 'done', created_at: iso(5) },
+  ];
+
   return fake;
 }
 
