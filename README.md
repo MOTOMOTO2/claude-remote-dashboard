@@ -891,6 +891,24 @@ fake with plain tables: the status names the latest failure and why,
 exist, and a table the account never made reads as "none yet". Deleting the status filter
 from the claim fails that suite, which is the point of writing it.
 
+The house relay gets the same treatment, against a stand-in hub answering the
+four Home Assistant endpoints it uses: a light is mirrored with its room and
+its brightness, a wifi-strength sensor is not worth a card, a device the hub
+no longer has is dropped, a hub that is off does not take the relay down with
+it, and a tap becomes the service call it means. Then **two relays at once**,
+which is where the rules live: each gets its own heartbeat row rather than
+overwriting one, the standby writes no devices and does not get to decide a
+device is gone but still obeys the queued tap and writes back what it
+changed, a relay whose heartbeat went stale is stepped around, a relay on the
+hub takes the mirror from a live PC, and one reaching its hub over loopback
+works out that it is on the hub without being told.
+
+That stand-in answers `Prefer: return=minimal` with an empty body, as
+PostgREST does, which is not pedantry: reading that as "this table does not
+exist" stopped the relay dead on its first heartbeat, and a double that
+always sent a body would have hidden it. With the bug put back, twelve of
+these checks fail.
+
 The Supabase CDN import is swapped for a local fake by a Node module loader
 (`test/loader.mjs`), so the app runs in the test exactly as the browser loads
 it — there is no test-only seam in the app code.
@@ -905,7 +923,9 @@ Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
 Supabase project at all. Views: `home`, `agents`, `ask`, `chat`, `new`,
 `ideas`, `projects`, `auth`, `empty`, and `setup` — the assistant screen as an
-account that has not run the migration sees it. Themes: `light`, `dark`,
+account that has not run the migration sees it. `house` draws the two-relay
+case on purpose: the hub relaying, the desktop asleep for an hour and a half,
+and the house still online. Themes: `light`, `dark`,
 `mobile`. (`preview/` is gitignored.)
 
 To screenshot one headlessly:
@@ -1104,6 +1124,35 @@ house that has stopped answering.
   shown for anything two to six days out, a date beyond that.
 - **The 14-day window** on the activity strip is fixed; it is the span that
   fits a phone at a 24px bar cap without becoming a scrubber.
+- **The house relay moved to the hub rather than the house getting a tunnel.**
+  "Reach it without being on my wifi" has two conventional answers: expose
+  the hub (a forwarded port, a reverse proxy, or a paid subscription), or put
+  the relay somewhere that is always on. The second one needed no new trust,
+  no new bill and no inbound connection — and the hub is already the thing
+  in the house that never sleeps. The add-on is the first path offered
+  because Home Assistant OS is what a Pi hub usually runs; the systemd script
+  is there because it is not always.
+- **An add-on over an access token.** A Home Assistant add-on can reach the
+  hub through the Supervisor, so `bridge/addon` has no `HA_TOKEN` at all —
+  one fewer password for your front door, and nothing to re-paste when one is
+  rotated. The cost is that the add-on only exists on Supervised installs,
+  which is what `install-on-pi.sh` is for.
+- **A relay guesses where it is rather than asking you.** You only reach a
+  hub over loopback when you are standing on it, so `HA_URL` already carries
+  the answer, and a setting you have to get right is a setting that will
+  sometimes be wrong. `HOUSE_RELAY_HOST` overrides it for the setup the guess
+  does not fit.
+- **One leader for the mirror, but every relay obeys taps.** The two halves
+  fail differently. A tap is idempotent and the claim is already locked on
+  the row's status, so letting whichever relay is awake take it makes the
+  house *more* reachable. Deciding which devices exist is not idempotent —
+  two relays with different `HA_EXCLUDE` settings would delete each other's
+  rows on a loop — so exactly one does that, and the order that picks it has
+  no ties on purpose.
+- **A standby still writes the device it just changed.** It is the one
+  exception to leader-only writing, and without it a tap taken by the standby
+  would sit there looking like nothing happened until the leader's next poll.
+  Ten seconds is a long time to wonder whether you turned the light off.
 
 ## Keyboard
 

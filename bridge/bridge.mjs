@@ -32,13 +32,16 @@
 //   HA_URL=http://homeassistant.local:8123
 //   HA_TOKEN=...
 //
+// Worth knowing: a house relayed from here is reachable only while this PC
+// is awake. bridge/addon runs the same relay on the hub, which is not.
+//
 // Optional: ASSISTANT_NAME (defaults to this computer's name), ASSISTANT_MODEL
 // (shown in the dashboard), ASSISTANT_HEADERS (JSON, sent with ASSISTANT_URL).
 
 import { hostname } from 'node:os';
 import { answerWith } from './reply.mjs';
 import { loadDotEnv } from './env.mjs';
-import { startHouse } from './house.mjs';
+import { startHouse, relayIdentity } from './house.mjs';
 import * as ha from './ha.mjs';
 
 // ── configuration ─────────────────────────────────────────────────────
@@ -305,7 +308,11 @@ if (!once && answer) setInterval(beat, BEAT_MS).unref?.();
 const house = ha.configured()
   ? startHouse({ api, owner, log: (...a) => log('house:', ...a), once })
   : null;
-if (house) log(`house relay on ${ha.config().url}`);
+if (house) {
+  const where = relayIdentity();
+  log(`house relay on ${ha.config().url} as "${where.relay}"`
+    + `, ${where.host === 'hub' ? 'on the hub' : 'on this PC'}`);
+}
 else if (!answer) log('nothing to relay — set ASSISTANT_CMD or HA_URL');
 
 // One message at a time on purpose: your assistant is one process on one

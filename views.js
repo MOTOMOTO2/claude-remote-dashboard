@@ -1403,7 +1403,7 @@ const deviceStatus = (device, pending) => {
 export function houseExplainer() {
   if (!state.houseReady) {
     return 'The house tables are not in your Supabase project yet. Run bridge/schema.sql, '
-      + 'then point the bridge on your PC at your hub.';
+      + 'then put a relay next to your hub — on the hub itself, or on your PC.';
   }
   return houseState().note;
 }
