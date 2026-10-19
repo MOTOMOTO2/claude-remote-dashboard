@@ -113,7 +113,7 @@ export function outranks(a, b) {
  * @param once   do one pass and stop, for tests and for `--once`
  */
 export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
-  const name = () => ha.config().name;
+  const name = () => ha.houseName();
   const me = relayIdentity();
   const seen = new Map();          // entity_id -> fingerprint of the last write
   const known = new Set();         // what the table currently holds
@@ -135,7 +135,7 @@ export function startHouse({ api, owner, log = () => {}, once = false } = {}) {
         host: me.host,
         priority: me.priority,
         mirroring,
-        name: name(),
+        name: await name(),
         kind: 'home-assistant',
         devices,
         reachable,
