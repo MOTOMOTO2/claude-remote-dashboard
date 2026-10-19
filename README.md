@@ -9,9 +9,9 @@ creates the repo, writes the code, pushes it — and streams its log back here
 while it does. You type a question instead, and the same relay carries it to
 your own assistant on the same PC, which streams its answer back the same way.
 
-This repo is the dashboard and the small bridge that keeps your assistant
-reachable (`bridge/`). The runner that claims coding jobs and drives Claude
-Code lives on the PC, in its own repo.
+This repo is the dashboard and the small bridge that keeps your assistant —
+and your house — reachable (`bridge/`). The runner that claims coding jobs
+and drives Claude Code lives on the PC, in its own repo.
 
 ```
 ┌──────────┐   insert job    ┌──────────┐   claim job    ┌─────────────┐
@@ -21,8 +21,13 @@ Code lives on the PC, in its own repo.
 │          │                 │          │                ┌─────────────┐
 │          │   ask a thing   │          │  claims it     │ assistant   │
 │          │ ──────────────▶ │          │ ◀───────────── │ bridge      │
-└──────────┘ ◀────────────── └──────────┘ ─────────────▶ │ → your AI   │
-              the reply, live              streams back  └─────────────┘
+│          │ ◀────────────── │          │ ─────────────▶ │ → your AI   │
+│          │   the reply     │          │  streams back  └─────────────┘
+│          │                 │          │                ┌─────────────┐
+│          │  tap a light    │          │  claims it     │ house relay │
+│          │ ──────────────▶ │          │ ◀───────────── │ → the Pi    │
+└──────────┘ ◀────────────── └──────────┘ ─────────────▶ │   on my LAN │
+              every device                 what it saw   └─────────────┘
 ```
 
 ## What it gives you
@@ -42,6 +47,14 @@ Code lives on the PC, in its own repo.
   *waiting for your PC*. Not set up yet? `npm run bridge:setup` says exactly
   what is left, and the screen itself carries the SQL and the link to paste it
   into. See [Your own assistant](#your-own-assistant).
+- **Your house, from anywhere** — `#/house` is the smart home hub on your
+  Pi: every room, what is on, how warm it is, whether the door is locked, and
+  the tap that changes it. The hub is on your own network and this page is
+  not, so the same relay carries it — no port forwarded, and its token never
+  leaves your PC. A tap always says where it got to: *online*, *waiting for
+  your PC*, or *hub not answering*, which are three different problems. Your
+  assistant gets the same house as two tools, so "turn the kitchen light off"
+  works in `#/ask` too. See [Your house](#your-house).
 - **Several agents at once** — `#/agents` is the fleet: a card per agent with
   what it is doing this second and the tail of its own log, a ceiling you set
   (1–6) that your desktop claims against, and a queue where every job says what
@@ -231,7 +244,9 @@ gives it the rest through `bridge/tools.mjs`, which it runs as its
 | `dashboard_status` | Whether the PC runner is up; jobs running, paused and queued; the latest failure and why; usage windows |
 | `job_details` | One job — by id, or a project's latest — with the last things it did |
 | `list_projects` | The `projects` table: what each one is, and where it is live |
-| `queue_job` | Starts a job, writing the same row the New screen does (effort high, cap 90%, a new repo private). The only tool that acts |
+| `queue_job` | Starts a job, writing the same row the New screen does (effort high, cap 90%, a new repo private). Acts |
+| `house_status` | The smart home hub: what is on, how warm each room is, what is locked or open |
+| `house_control` | Switches, locks, opens, dims or sets something in the house. Acts |
 
 `tools.mjs` signs in the way the bridge does — the same `.env`, as you, under
 row-level security — so your assistant can see and do what you can and no
@@ -360,6 +375,135 @@ replica identity, because a reply streams in as repeated `UPDATE`s to one
 row. Skip that and replies arrive in lumps instead of not at all: the app
 polls the newest messages every 1.5 seconds *while something is pending*, and
 stops the moment nothing is.
+
+## Your house
+
+`#/house` is the smart home hub on your Pi, room by room: what is on, how
+warm it is, whether the door is locked, and the tap that changes any of it.
+Same relay as everything else here, for the same reason — the hub lives on
+your network and your phone does not.
+
+```
+┌──────────┐   tap a light   ┌──────────┐   claims it    ┌─────────────┐
+│ this app │ ──────────────▶ │ Supabase │ ◀───────────── │ house relay │
+│  (phone) │ ◀────────────── │          │ ─────────────▶ │   (your PC) │
+└──────────┘  every device    └──────────┘  what it saw   └──────┬──────┘
+                                                                 │ LAN only
+                                                          ┌──────▼──────┐
+                                                          │ the Pi hub  │
+                                                          └─────────────┘
+```
+
+Nothing listens for inbound connections. No port is forwarded, no tunnel is
+opened, and the hub's access token stays in `bridge/.env` on the PC — it is
+never in `config.js`, never in the browser, and never in this repo.
+
+**The hub is assumed to be [Home Assistant](https://www.home-assistant.io/).**
+It is what a Raspberry Pi smart home hub usually is, and it was the
+conventional choice to make without asking. Only one file knows that:
+`bridge/ha.mjs` is the REST client and the map from this app's vocabulary
+(`on`, `off`, `level`, `temperature`…) onto Home Assistant services. A
+different hub is a new version of that one file; nothing above it changes.
+
+### What the screen says
+
+- **What is on**, as the hero figure, with the lights as a fraction, the
+  temperature, anything open or unlocked, and anything that has dropped off
+  the network. Unreachable is drawn apart from off, because a bulb switched
+  off at the wall and a bulb that has lost wifi look identical otherwise.
+- **A card per device**, grouped by the room Home Assistant puts it in, with
+  the rooms that have something on floated to the top — the question this
+  screen answers most often is *what did I leave on?* The card is its own
+  first action, so a light is one thumb away; a thermostat is the exception,
+  and makes you aim at the ↑ ↓ buttons rather than warming the flat because
+  a thumb landed anywhere on it.
+- **A dimmer** under any light that is on and can take one. It writes once,
+  when you let go, not twenty times as you drag.
+- **One tap** for the lights you left on, and a chip per scene the hub knows.
+- **Just now** — the last few things that happened, including the ones your
+  assistant did, under its own name.
+
+### Where a tap actually is
+
+Two things sit between a tap and a light, and they fail differently, so the
+screen never collapses them into one word:
+
+| What it says | What is true | What a tap does |
+|---|---|---|
+| `no hub yet` | nothing has ever checked in | the setup card, not a lie |
+| `waiting for your PC` | the relay's heartbeat is over 30s old | queues, and runs when the PC is back |
+| `hub not answering` | the relay is up; the Pi did not answer it | queues, and the error says which |
+| `online` | both halves are there | takes effect now |
+
+The heartbeat row carries both facts — `last_seen` for the relay, `reachable`
+and `error` for the hub — which is the only reason the table above can be
+honest. A tap that the hub refuses raises a toast and a notification rather
+than leaving the card looking like nothing happened, because a device that
+simply stays as it was is indistinguishable from a tap that never registered.
+
+### Setting it up
+
+One paste of `bridge/schema.sql` (the same one the assistant needs — it
+covers both), then two lines in `bridge/.env`:
+
+```sh
+HA_URL=http://homeassistant.local:8123
+HA_TOKEN=...        # Home Assistant → your profile → Security →
+                    # Long-lived access tokens → Create token
+```
+
+Then:
+
+```sh
+npm run house:try     # does the hub answer, and how much can it see?
+npm run house:list    # every device it would mirror, as a table
+npm run bridge        # the assistant and the house, one process
+```
+
+`npm run bridge` runs both relays, so the Windows logon task you already have
+(`bridge/run-at-logon.ps1`) covers the house with no changes. `npm run house`
+runs only the house, for a PC with no assistant on it.
+
+Optional, all in `bridge/.env`: `HA_NAME` (what the dashboard calls it —
+defaults to the hub's own location name), `HA_SENSORS=all` (keep every
+diagnostic sensor; by default only the readings a house screen is for are
+mirrored, because a real install has hundreds of wifi-strength and uptime
+entities), `HA_EXCLUDE` (a regex of entity ids to skip), `HA_POLL_MS`,
+`HA_TIMEOUT_MS`.
+
+### What it writes
+
+Only what changed. The relay keeps a fingerprint per device and rewrites a
+row when the hub's answer for it differs, so an idle house costs no writes at
+all. A device unpaired from the hub is dropped rather than left on the
+dashboard for ever — including one unpaired while the relay was not running,
+because the first sync reads what the table already holds.
+
+### Your assistant can open the door too
+
+The same house, as two more tools in `bridge/tools.mjs`:
+
+| Tool | What it does |
+|---|---|
+| `house_status` | What is on, how warm each room is, what is locked or open. A room or a kind narrows it; with neither, it reports what is on and lists the rooms to ask about next |
+| `house_control` | Switches, locks, opens, dims, sets a thermostat. Names a device, or a room to act on all of them. The second tool that acts |
+
+These go straight to the hub rather than round-tripping through Supabase —
+your assistant runs on the same PC as the relay, so going out to the internet
+and back to reach the next room would be slower and no safer. Each one is
+recorded in `house_commands` as `source: assistant`, so the dashboard's
+activity list has one story rather than two.
+
+Three rules in `house_control` exist because a small local model needed them:
+
+- **A bare room means its lights.** "Turn off the kitchen" never means the
+  fridge. It says so in the answer when it assumes this.
+- **Several things with one name is fine when they are the same kind of
+  thing** — "the kitchen lights" is two bulbs — but a name matching a lamp
+  *and* a lock is refused with the kinds listed.
+- **Nothing changed is a failure, not a report.** An action a device cannot
+  do exits non-zero with the reason, so the next attempt is a different one
+  rather than the same one again.
 
 ## Several agents at once
 
@@ -689,6 +833,7 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `views.js` | Rendering. Reads state, writes DOM; never queries |
 | `fleet.js` | Slots, what holds them, and what each queued job waits for. Pure |
 | `assistant.js` | Your assistant: presence, where a reply is, conversations. Pure |
+| `house.js` | Your house: what a device is, what you can do to it, where a tap is. Pure |
 | `suggest.js` | The next step for a project you have, read off its thread. Pure |
 | `ideas.js` | Whole new projects, read off the themes your work shows. Pure |
 | `catalog.js` | The Projects screen's model: every project, its runs, its live link. Pure |
@@ -705,12 +850,15 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `tools/serve.mjs` | The static server — in development and in the container |
 | `bridge/bridge.mjs` | The PC half: claims what you asked, streams the answer back |
 | `bridge/reply.mjs` | The two adapters, and every guess about a response shape |
+| `bridge/house.mjs` | The house relay: mirrors the hub, claims your taps. Runs alone or inside the bridge |
+| `bridge/ha.mjs` | The only file that knows the hub is Home Assistant |
+| `bridge/env.mjs` | The `.env` loader and the Supabase client every script here shares |
 | `bridge/setup.mjs` | Says which of the four setup steps are done, and does the two it can |
-| `bridge/schema.sql` | The four tables this account needs, in one paste |
+| `bridge/schema.sql` | The seven tables this account needs, in one paste |
 | `bridge/example-assistant.mjs` | A stand-in assistant, and the shape to copy |
 | `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
 | `bridge/keep-up.mjs` | What that task runs: the bridge, restarted if it stops, logged to `bridge.log` |
-| `bridge/tools.mjs` | The dashboard as tools for your assistant: status, a job's detail, projects, queueing a job |
+| `bridge/tools.mjs` | The dashboard as tools for your assistant: status, a job's detail, projects, queueing a job, and the house |
 | `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
 
 ## Data it expects
@@ -858,6 +1006,7 @@ counts as online if its `last_seen` is under 30 seconds old.
 | `/` | Focus the composer |
 | `n` | New project |
 | `a` | Agents |
+| `h` | House |
 | `k` | As**k** your assistant |
 | `i` | Ideas |
 | `p` | Projects |
