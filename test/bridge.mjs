@@ -11,6 +11,9 @@
 
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -107,25 +110,28 @@ const asked = {
   text: 'hello', created_at: new Date(Date.now() - 1000).toISOString(),
 };
 
+/** Everything the bridge reads, pointed at the fake instead of your .env. */
+const bridgeEnv = (port, cmd) => ({
+  ...process.env,
+  SUPABASE_URL: `http://127.0.0.1:${port}`,
+  SUPABASE_ANON_KEY: 'anon',
+  SUPABASE_EMAIL: 'me@example.com',
+  SUPABASE_PASSWORD: 'hunter2',
+  SUPABASE_SERVICE_KEY: '',
+  OWNER_ID: '',
+  ASSISTANT_NAME: 'jarvis',
+  ASSISTANT_MODEL: 'test-brain',
+  ASSISTANT_URL: '',
+  ASSISTANT_CMD: cmd ?? `"${process.execPath}" bridge/example-assistant.mjs`,
+});
+
 /** Run the real bridge once against the fake, and hand back what it did. */
 async function runBridge({ messages, onPatch, cmd }) {
   const { state, server, port } = await startFake({ messages, onPatch });
 
   const child = spawn(process.execPath, ['bridge/bridge.mjs', '--once'], {
     cwd: root,
-    env: {
-      ...process.env,
-      SUPABASE_URL: `http://127.0.0.1:${port}`,
-      SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_EMAIL: 'me@example.com',
-      SUPABASE_PASSWORD: 'hunter2',
-      SUPABASE_SERVICE_KEY: '',
-      OWNER_ID: '',
-      ASSISTANT_NAME: 'jarvis',
-      ASSISTANT_MODEL: 'test-brain',
-      ASSISTANT_URL: '',
-      ASSISTANT_CMD: cmd ?? `"${process.execPath}" bridge/example-assistant.mjs`,
-    },
+    env: bridgeEnv(port, cmd),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -208,6 +214,58 @@ ok('the bridge itself survives it', broken.code === 0, broken.out);
 const idle = await runBridge({ messages: [asked] });
 has('with no queued reply it says so and stops', idle.out, 'nothing waiting');
 ok('and still checked in first', idle.state.assistants.length === 1);
+
+// ── 5. the keeper ─────────────────────────────────────────────────────
+// keep-up.mjs is what the Windows task runs. A bridge that stops has to be
+// started again, and stopping the keeper has to take the bridge with it.
+
+const until = async (cond, ms = 10_000) => {
+  const t0 = Date.now();
+  while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 50));
+  return cond();
+};
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const logAt = join(mkdtempSync(join(tmpdir(), 'keep-up-')), 'bridge.log');
+const readLog = () => { try { return readFileSync(logAt, 'utf8'); } catch { return ''; } };
+
+{
+  // --once with nothing queued: every bridge it starts checks in and exits.
+  const { state, server, port } = await startFake({ messages: [asked] });
+  const keeper = spawn(process.execPath, ['bridge/keep-up.mjs', '--once'], {
+    cwd: root,
+    env: { ...bridgeEnv(port), BRIDGE_LOG: logAt, BRIDGE_RETRY_MS: '50' },
+    stdio: 'ignore',
+  });
+  const signIns = () => state.requests.filter((r) => r.path.startsWith('/auth/v1/token')).length;
+  ok('a bridge that stops is started again', await until(() => signIns() >= 3), `${signIns()} starts`);
+  keeper.kill();
+  await new Promise((r) => keeper.on('close', r));
+  server.close();
+
+  has('what the bridge printed ends up in the log', readLog(), 'nothing waiting');
+  has('and so does the keeper saying it restarted it', readLog(), 'starting again');
+}
+
+{
+  const { server, port } = await startFake({ messages: [asked] });
+  const keeper = spawn(process.execPath, ['bridge/keep-up.mjs'], {
+    cwd: root,
+    env: { ...bridgeEnv(port), BRIDGE_LOG: logAt },
+    stdio: 'ignore',
+  });
+  const pids = () => [...readLog().matchAll(/started the bridge \(pid (\d+)\)/g)].map((m) => Number(m[1]));
+  const before = pids().length;
+  await until(() => pids().length > before);
+  const bridgePid = pids().at(-1);
+  await until(() => readLog().includes('bridge up as'));
+
+  keeper.kill('SIGKILL');
+  await new Promise((r) => keeper.on('close', r));
+  ok('killing the keeper takes the bridge with it', await until(() => !alive(bridgePid), 5_000),
+    `pid ${bridgePid} still running`);
+  if (alive(bridgePid)) process.kill(bridgePid);
+  server.close();
+}
 
 // ── report ────────────────────────────────────────────────────────────
 
