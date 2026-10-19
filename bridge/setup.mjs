@@ -126,18 +126,23 @@ if (!existsSync(ENV_PATH)) {
 }
 
 const env = { ...parseEnv(readFileSync(ENV_PATH, 'utf8')), ...process.env };
-const signIn = env.SUPABASE_SERVICE_KEY
-  ? 'the service-role key'
-  : (env.SUPABASE_EMAIL && env.SUPABASE_PASSWORD && !/example\.com$/.test(env.SUPABASE_EMAIL))
-    ? `as ${env.SUPABASE_EMAIL}` : '';
+const named = env.SUPABASE_EMAIL && !/example\.com$/.test(env.SUPABASE_EMAIL);
+const signIn = env.SUPABASE_SERVICE_KEY ? 'with the service-role key'
+  : (named && env.SUPABASE_PASSWORD) ? `as ${env.SUPABASE_EMAIL}` : '';
 
+// Name the one line that is missing rather than both of them: "fill this in"
+// is the sort of instruction you read twice.
 if (!signIn) {
   step('todo', created ? 'bridge/.env (written for you)' : 'bridge/.env',
     created ? `Created from the example, with ${cfg.url} already in it.` : '',
-    `Still needs who to sign in as. Edit ${fileURLToPath(ENV_PATH)}:`,
-    `${quote('SUPABASE_EMAIL=')}  the address you sign in to the dashboard with`,
-    `${quote('SUPABASE_PASSWORD=')}  that account's password`,
-    `${C.dim}It is gitignored. The bridge signs in as you, so row-level security still applies.${C.off}`);
+    `Edit ${fileURLToPath(ENV_PATH)}:`,
+    named
+      ? `${quote('SUPABASE_PASSWORD=')}  the password for ${env.SUPABASE_EMAIL}. That one line `
+        + 'is all that is missing from this file.'
+      : `${quote('SUPABASE_EMAIL=')} and ${quote('SUPABASE_PASSWORD=')}  the account you sign `
+        + 'in to the dashboard with',
+    `${C.dim}It is gitignored, and it stays on this machine. The bridge signs in as you, so `
+      + `row-level security still applies and no service-role key ends up here.${C.off}`);
 } else {
   step('ok', 'bridge/.env', `signs in ${signIn}`);
 }
