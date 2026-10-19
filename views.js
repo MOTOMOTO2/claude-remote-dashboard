@@ -136,7 +136,12 @@ export function renderTopbar() {
   const { host, hostFresh } = state;
   pill.classList.toggle('online', hostFresh);
   pill.classList.toggle('offline', !hostFresh);
-  $('host-name').textContent = host ? (hostFresh ? host.name : `${host.name} · off`) : 'no desktop';
+  const hostWord = host ? (hostFresh ? host.name : `${host.name} · off`) : 'no desktop';
+  $('host-name').textContent = hostWord;
+  // On a narrow screen the name is hidden to give the title its width back,
+  // so the button has to carry it some other way.
+  pill.setAttribute('aria-label', `Desktop: ${hostWord}`);
+  pill.title = hostWord;
 }
 
 export function hostExplainer() {
@@ -1125,28 +1130,58 @@ export function askExplainer() {
     + 'in the queue and is answered as soon as your PC is on again.';
 }
 
-/** What to do about it, when there is something to do. */
+/**
+ * The Supabase SQL editor for the project config.js points at. Derived
+ * rather than configured, because the project reference is already in the
+ * URL and one more setting to keep in sync is one too many.
+ */
+export function sqlEditorUrl() {
+  const ref = String(window.CONFIG?.supabaseUrl ?? '')
+    .match(/^https:\/\/([a-z0-9-]+)\.supabase\./i)?.[1];
+  return ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : null;
+}
+
+/**
+ * What to do about it — as the two steps it actually is, each with the
+ * button that does it. Saying "run bridge/schema.sql" to someone holding a
+ * phone is a dead end; copying the file and opening the editor is not.
+ */
 function setupHtml() {
+  const editor = sqlEditorUrl();
+  const recheck = `<button class="btn tiny ghost" data-ask-recheck>${icon('retry')}check again</button>`;
+
   if (!state.askReady) {
     return `
+      <p class="setup-step"><span class="setup-n">1</span>Add the tables to Supabase</p>
       <div class="info-row"><span class="info-k">Tables</span>
         <span class="info-v"><span class="state" data-status="error"><i class="dot"></i>missing</span></span></div>
       <div class="info-row"><span class="info-k">What to run</span>
         <span class="info-v"><code>bridge/schema.sql</code></span></div>
-      <p class="info-note">Paste that file into the Supabase SQL editor once. It creates the
-        three tables this screen reads — conversations, messages, and the bridge's
-        heartbeat — each one locked to your own account.${
-        state.askError ? ` The read said: ${esc(state.askError)}` : ''}</p>`;
+      <p class="info-note">One paste, once. It adds the four tables this account is
+        missing — conversations, messages, the bridge's heartbeat and the agent
+        ceiling — each locked to your own account, and changes nothing that is
+        already there.${state.askError ? ` The read said: ${esc(state.askError)}` : ''}</p>
+      <div class="setup-acts">
+        <button class="btn tiny" data-copy-schema>${icon('copy')}copy the SQL</button>
+        ${editor ? `<a class="btn tiny ghost" href="${esc(editor)}" target="_blank"
+           rel="noopener">${icon('link')}open the SQL editor</a>` : ''}
+        ${recheck}
+      </div>`;
   }
   return `
+    <p class="setup-step"><span class="setup-n">2</span>Start the bridge on your PC</p>
     <div class="info-row"><span class="info-k">Bridge</span>
       <span class="info-v"><span class="state" data-status="paused"><i class="dot"></i>never checked in</span></span></div>
     <div class="info-row"><span class="info-k">What to run</span>
-      <span class="info-v"><code>node bridge/bridge.mjs</code></span></div>
-    <p class="info-note">On the PC, point <code>ASSISTANT_CMD</code> or
-      <code>ASSISTANT_URL</code> at the assistant you built and leave the bridge running.
-      It claims whatever you send from here, streams the answer back, and says hello
-      every ten seconds so this screen can tell you it is awake.</p>`;
+      <span class="info-v"><code>npm run bridge:setup</code></span></div>
+    <p class="info-note">That checks the rest for you: it writes <code>bridge/.env</code>,
+      asks whatever <code>ASSISTANT_CMD</code> or <code>ASSISTANT_URL</code> points at, and
+      tells you what is left. Then <code>npm run bridge</code> leaves it running — it says
+      hello every ten seconds, so this screen knows the moment it is awake.</p>
+    <div class="setup-acts">
+      <button class="btn tiny" data-copy-cmd="npm run bridge:setup">${icon('copy')}copy the command</button>
+      ${recheck}
+    </div>`;
 }
 
 const starterHtml = (st, i) => `

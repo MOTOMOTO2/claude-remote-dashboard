@@ -9,7 +9,10 @@
     "contrast": "node tools/contrast.mjs",
     "serve": "node tools/serve.mjs",
     "preview": "node --import ./test/register.mjs tools/preview.mjs",
-    "bridge": "node bridge/bridge.mjs"
+    "mobile": "node tools/mobile-audit.mjs",
+    "bridge": "node bridge/bridge.mjs",
+    "bridge:setup": "node bridge/setup.mjs",
+    "bridge:try": "node bridge/bridge.mjs --try"
   },
   "devDependencies": {
     "jsdom": "^27.0.0"

@@ -93,3 +93,21 @@ end $$;
 
 -- Needed for an UPDATE payload to carry the whole row rather than the key.
 alter table chat_messages replica identity full;
+
+-- ── how many agents at once ───────────────────────────────────────────
+-- Not the assistant's table, but the other one the dashboard asks for and
+-- keeps working without: the ceiling the Agents screen writes, and the
+-- desktop runner claims against. Included here so one paste brings an
+-- account all the way up to date rather than two.
+
+create table if not exists settings (
+  owner        uuid primary key references auth.users on delete cascade,
+  max_parallel int  not null default 3 check (max_parallel between 1 and 6),
+  updated_at   timestamptz not null default now()
+);
+
+alter table settings enable row level security;
+
+drop policy if exists "own settings" on settings;
+create policy "own settings" on settings
+  for all using (auth.uid() = owner) with check (auth.uid() = owner);

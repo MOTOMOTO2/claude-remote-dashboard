@@ -3,7 +3,8 @@
 node_modules
 preview
 test
-bridge
+bridge/.env
+bridge/node_modules
 npm-debug.log
 *.png.tmp
 .DS_Store

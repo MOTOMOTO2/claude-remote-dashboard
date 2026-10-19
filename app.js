@@ -417,9 +417,43 @@ function queuedSentence(slug, id) {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete],[data-copy-schema],[data-copy-cmd],[data-ask-recheck]');
   if (!btn) return;
   const d = btn.dataset;
+
+  // ── setting the assistant up, from the screen that is complaining ──
+  // The migration is a file in this repo, so the phone can hand you the SQL
+  // rather than telling you to go and find it.
+  if (d.copySchema !== undefined) {
+    btn.disabled = true;
+    try {
+      const res = await fetch('bridge/schema.sql');
+      if (!res.ok) throw new Error(String(res.status));
+      await copy(await res.text(), 'SQL copied — paste it into the editor');
+    } catch {
+      toast('Could not read bridge/schema.sql — open it from the repo', { bad: true });
+    }
+    btn.disabled = false;
+    return;
+  }
+
+  if (d.copyCmd) {
+    copy(d.copyCmd, 'Command copied');
+    return;
+  }
+
+  // Re-read the three tables and say what changed, so you can run the SQL on
+  // the laptop and confirm it from the phone without a reload.
+  if (d.askRecheck !== undefined) {
+    const was = store.state.askReady;
+    btn.disabled = true;
+    await store.loadAsk();
+    btn.disabled = false;
+    if (!store.state.askReady) toast('Still missing — the tables are not there yet', { bad: true });
+    else if (!was) toast('Tables are there. Now start the bridge on your PC.', { glyph: 'check', ms: 4200 });
+    else toast(views.askExplainer(), { glyph: 'brain', ms: 5200 });
+    return;
+  }
 
   // An opener is the same deal as a suggestion: it fills the box and you
   // still press send.

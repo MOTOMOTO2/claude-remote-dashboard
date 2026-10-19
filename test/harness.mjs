@@ -161,7 +161,7 @@ export function makeWindow({ width = 1200, dark = false, html = file('index.html
   };
   window.Notification = Notification;
 
-  window.CONFIG = { supabaseUrl: 'https://x.supabase.co', supabaseAnonKey: 'anon' };
+  window.CONFIG = { supabaseUrl: 'https://proj-ref.supabase.co', supabaseAnonKey: 'anon' };
   window.confirm = () => true;
   Object.defineProperty(window.navigator, 'clipboard', {
     value: { writeText: async () => {} }, configurable: true,

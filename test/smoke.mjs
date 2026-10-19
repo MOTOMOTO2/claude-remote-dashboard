@@ -925,9 +925,10 @@ fake.tables.assistants = [];
 await askStore.pollAssistant();
 await tick();
 ok('with no bridge the screen says what to run', !el('ask-setup').hidden);
-has('naming the command', el('ask-setup').textContent, 'node bridge/bridge.mjs');
+has('naming the command', el('ask-setup').textContent, 'npm run bridge:setup');
 has('and the two ways to point it at your assistant',
   el('ask-setup').textContent, 'ASSISTANT_CMD');
+has('with a button that copies it', el('ask-setup').innerHTML, 'data-copy-cmd');
 has('the pill says there is nothing there yet', text('ask-presence-text'), 'no assistant yet');
 
 // ── a schema that predates the feature ────────────────────────────────
@@ -939,6 +940,20 @@ has('a missing table asks you to run the migration', el('ask-setup').textContent
 has('and prints what the read actually said',
   el('ask-setup').textContent, 'does not exist');
 ok('the app is still standing', !el('ask-view').hidden);
+
+// Setup you can do from the phone that is complaining: the SQL is one tap
+// away, so is the editor it goes into, and so is asking again afterwards.
+has('the SQL is one tap away', el('ask-setup').innerHTML, 'data-copy-schema');
+has('so is the editor it goes into',
+  el('ask-setup').innerHTML, 'supabase.com/dashboard/project/');
+has('and the project in the link is the configured one',
+  el('ask-setup').innerHTML, 'proj-ref/sql/new');
+has('and checking again is a button, not a reload',
+  el('ask-setup').innerHTML, 'data-ask-recheck');
+
+el('ask-setup').querySelector('[data-ask-recheck]').click();
+await tick();
+ok('checking again while it is still missing keeps the card up', !el('ask-setup').hidden);
 
 fake.failTable('chats', null);
 fake.tables.assistants = [
