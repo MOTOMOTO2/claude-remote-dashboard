@@ -96,5 +96,5 @@ $state = (Get-ScheduledTask -TaskName $TaskName).State
 Write-Host "Registered `"$TaskName`" and started it: $state."
 Write-Host "It runs at boot and at logon with no window, and starts the bridge again if it stops."
 Write-Host ""
-Write-Host "What it is doing:  Get-Content -Tail 20 -Wait `"$log`""
+Write-Host "What it is doing:  Get-Content -Encoding UTF8 -Tail 20 -Wait `"$log`""
 Write-Host "Undo:              powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Remove"
