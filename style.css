@@ -850,6 +850,9 @@ input[type=search]::-webkit-search-cancel-button { display: none; }
 .hero-now b { font-weight: 600; color: var(--text-2); }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .75rem; }
+/* Home's quick asks are whole sentences: they wrap inside the chip instead of
+   being cut to a fragment, and a two-line pill reads better with a smaller radius. */
+#ask-quick .chip { white-space: normal; text-align: left; max-width: 100%; border-radius: var(--r-md); }
 .chip-row:empty { display: none; }
 
 .stat-chip {
@@ -892,7 +895,8 @@ a.stat-chip:hover { background: var(--surface-3); color: var(--text); }
 }
 .tile-note {
   margin: .15rem 0 0; font-size: 11.5px; color: var(--muted);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
 }
 .tile-note:empty { display: none; }
 .tile.flag { border-color: color-mix(in srgb, var(--critical) 34%, var(--line)); }
@@ -902,7 +906,9 @@ a.stat-chip:hover { background: var(--surface-3); color: var(--text); }
 .stack { display: grid; gap: .4rem; }
 
 .row {
-  display: grid; gap: .15rem;
+  /* minmax(0, …): a grid column otherwise grows to its longest unbreakable line,
+     and one long name pushed the whole row past a 320px screen. */
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: .15rem;
   padding: .65rem .8rem;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -914,15 +920,19 @@ a.stat-chip:hover { background: var(--surface-3); color: var(--text); }
 .row:hover { border-color: var(--line-strong); }
 .row:active { transform: scale(.995); }
 .row-top { display: flex; align-items: center; gap: .5rem; }
+/* Two lines, then cut: one line left most names and every error a fragment on a
+   phone, and it's still bounded, so one long log line can't push a list around. */
 .row-name {
   flex: 1; min-width: 0;
   font-size: 14px; font-weight: 560;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
 }
 .row-when { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .row-sub {
   font-size: 12.5px; color: var(--muted);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
 }
 
 /* State always ships as dot + word — never colour alone. */

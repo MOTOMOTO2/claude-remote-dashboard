@@ -1374,11 +1374,13 @@ export function renderAskHome() {
   // Carry on where you were, or open with something worth asking.
   const quick = latest && latest.messages.length
     ? [`<a class="chip" href="${esc(askHref(latest.id))}">${icon('brain')}<span>${
-        esc(clip(latest.title, 32))}</span></a>`]
+        esc(clip(latest.title, 80))}</span></a>`]
     : [];
+  // Whole sentences, wrapped by the CSS: clipped to 34 characters they read as
+  // "What can you do that a hosted ass…" on a phone, which says nothing.
   for (const [i, st] of STARTERS.slice(0, 2).entries()) {
     quick.push(`<button type="button" class="chip" data-ask-starter="${i}">${
-      icon(st.icon)}<span>${esc(clip(st.text, 34))}</span></button>`);
+      icon(st.icon)}<span>${esc(st.text)}</span></button>`);
   }
   $('ask-quick').innerHTML = quick.join('');
 }
