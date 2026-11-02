@@ -132,27 +132,21 @@ service-role key must never appear there.
 
 ### On the web
 
-`Dockerfile` and `fly.toml` are here, so this deploys to Fly.io as it stands:
-
-```sh
-fly launch --no-deploy     # first time only
-fly deploy
-```
-
-The image is `node:22-alpine` with the files copied in and `tools/serve.mjs`
-as the server — the same dependency-free static server `npm run serve` uses,
-reading `PORT` (8080 in the container) and binding `0.0.0.0`. No build step.
+It lives on Vercel at <https://claude-remote-dashboard.vercel.app>, and every
+push to `main` deploys it; other branches get a preview link. The app is plain
+files with no build step, so `vercel.json` turns the build and install off and
+Vercel serves the repo root from its CDN — nothing to wake up, so it opens as
+fast cold as warm. `.vercelignore` keeps the bridge, tests and tools out of
+what's published. To deploy by hand: `npx vercel --prod`.
 
 **It needs no secrets.** `config.js` is publishable by design — the anon key
-only grants what row-level security allows — so the app boots with nothing
-set and there is no `fly secrets set` to run. Pointing a deployment at a
-different Supabase project means editing `config.js`, because a static file
-is read by the browser, not by the container.
+only grants what row-level security allows — so there are no environment
+variables to set. Pointing a deployment at a different Supabase project means
+editing `config.js`, because a static file is read by the browser.
 
 The assistant needs nothing here either. Its bridge runs on your PC and talks
-*outward* to Supabase, so a deployment of this app never holds a key for it —
-which is also why the container can scale to zero and your assistant stays
-reachable regardless.
+*outward* to Supabase, so a deployment of this app never holds a key for it,
+and your assistant stays reachable regardless of where the page is served from.
 
 ### On a phone
 
@@ -982,7 +976,7 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
 | `bridge/keep-up.mjs` | What that task runs: the bridge, restarted if it stops, logged to `bridge.log` |
 | `bridge/tools.mjs` | The dashboard as tools for your assistant: status, a job's detail, projects, queueing a job, and the house |
-| `Dockerfile`, `fly.toml` | What Fly.io builds and runs |
+| `vercel.json`, `.vercelignore` | How Vercel serves it: no build, the repo root, minus what only runs elsewhere |
 
 ## Data it expects
 

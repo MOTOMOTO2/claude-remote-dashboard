@@ -1,0 +1,11 @@
+# Vercel serves the app straight from the repo root. Everything below runs
+# somewhere else (the bridge on the PC or the hub) or only in development.
+bridge/
+test/
+tools/
+preview/
+docs/
+node_modules/
+Dockerfile
+fly.toml
+.dockerignore
