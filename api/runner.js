@@ -170,8 +170,12 @@ async function problems() {
     headers: { apikey: key, authorization: `Bearer ${key}` },
   }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
   if (!db.ok) {
+    // A legacy key (eyJ…) is a JWT; this project only takes sb_secret_ keys.
+    const legacy = !key.startsWith('sb_');
     out.push(`Supabase rejects SUPABASE_SERVICE_KEY (${db.status}: ${await said(db)}). `
-      + 'Use the secret key (sb_secret_…) from Settings → API keys.');
+      + (legacy ? 'It is not an sb_secret_ key: it looks like a legacy service_role key, which this '
+        + 'project has switched off. ' : '')
+      + 'Use the secret key (sb_secret_…) from Settings → API Keys → Secret keys.');
   } else {
     const user = await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(env.OWNER_ID)}`, {
       headers: { apikey: key, authorization: `Bearer ${key}` },

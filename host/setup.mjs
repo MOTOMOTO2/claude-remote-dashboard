@@ -126,7 +126,10 @@ await want('SUPABASE_SERVICE_KEY', async () => {
     if (!key) return '';
     const why = await badServiceKey(key);
     if (!why) { say('  Supabase accepts it.'); return key; }
-    say(`  Supabase rejects that key (${why}). Check you copied the whole secret key of this project.`);
+    say(key.startsWith('eyJ')
+      ? '  That is a legacy key (eyJ…), which this project has switched off. Use the one under '
+        + `${bold('Secret keys')} that starts with ${bold('sb_secret_')}.`
+      : `  Supabase rejects that key (${why}). Check you copied the whole secret key of this project.`);
   }
 });
 
