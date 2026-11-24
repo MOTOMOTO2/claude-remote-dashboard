@@ -49,6 +49,7 @@ export const WAIT = {
   queued: 'waiting its turn',
   offline: 'waiting for your PC',
   never: 'no assistant has checked in',
+  waking: 'starting Claude',
 };
 
 /**
@@ -58,8 +59,10 @@ export const WAIT = {
  * @param online  whether the bridge checked in recently
  * @param known   whether a bridge has ever checked in
  * @param ahead   how many other replies are queued in front of it
+ * @param wakes   whether Claude in the cloud starts on demand, in which case
+ *                nobody listening yet means "starting", not "waiting"
  */
-export function replyState({ message, online = false, known = true, ahead = 0 } = {}) {
+export function replyState({ message, online = false, known = true, ahead = 0, wakes = false } = {}) {
   const m = message ?? {};
   if (m.status === 'error') {
     return { kind: 'failed', live: false, label: 'did not come back', note: m.error || '' };
@@ -71,6 +74,15 @@ export function replyState({ message, online = false, known = true, ahead = 0 } 
   }
   if (m.status === 'streaming') {
     return { kind: 'typing', live: true, label: WAIT.typing, note: '' };
+  }
+  if (!online && wakes) {
+    return {
+      kind: 'waking',
+      live: true,
+      label: WAIT.waking,
+      note: 'Claude runs in the cloud and sleeps when nobody is asking. It is starting now, '
+          + 'so the answer follows in a few seconds. You can close the app.',
+    };
   }
   if (!known) {
     return {
@@ -168,13 +180,13 @@ export function pendingQueue(messages = []) {
 export const pendingCount = (messages = []) => pendingQueue(messages).length;
 
 /**
- * Openers for an assistant you have never spoken to. Deliberately about the
- * thing it has that a hosted model doesn't — it is on your machine, it is
- * yours, and it is awake whenever the PC is.
+ * Openers for an assistant you have never spoken to. Each one leans on
+ * something it can reach that a plain chat window can't: the agents' work,
+ * your projects, and the house.
  */
 export const STARTERS = [
-  { icon: 'brain', text: 'What can you do that a hosted assistant can’t?' },
-  { icon: 'doc', text: 'Summarise what I worked on this week.' },
-  { icon: 'bulb', text: 'Help me think through what to build next.' },
-  { icon: 'terminal', text: 'Explain what’s running on my PC right now.' },
+  { icon: 'doc', text: 'What did my agents get done this week?' },
+  { icon: 'bulb', text: 'Which of my projects should I pick up next, and why?' },
+  { icon: 'terminal', text: 'Why did my last failed job fail, and how do I fix it?' },
+  { icon: 'brain', text: 'Turn off any lights I left on.' },
 ];

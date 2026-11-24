@@ -135,7 +135,7 @@ function draw() {
 
   $('prompt').placeholder = v === 'project'
     ? `Message ${route.slug}…`
-    : v === 'pending' ? 'Waiting for your desktop…'
+    : v === 'pending' ? (store.state.cloud ? 'Starting in the cloud…' : 'Waiting for your desktop…')
     : v === 'ask' ? `Ask ${store.askPresence().name}…`
     : 'Describe what to build…';
   $('send').disabled = v === 'pending';
@@ -421,6 +421,7 @@ async function tapHouse(commands) {
 /** Where that message actually is now — not just "sent". */
 function askSentence() {
   const who = store.askPresence();
+  if (!who.online && store.state.cloud) return 'Sent — starting Claude in the cloud';
   if (!who.known) return 'Saved — no assistant has checked in yet';
   if (!who.online) return 'Saved — answered as soon as your PC is on';
   const ahead = store.askPending().length - 1;
@@ -434,6 +435,7 @@ function askSentence() {
  * whether a slot is free, and what it is behind if not.
  */
 function queuedSentence(slug, id) {
+  if (!store.state.hostFresh && store.state.cloud) return 'Queued — starting in the cloud';
   if (!store.state.hostFresh) return 'Queued — waiting for your desktop';
   const f = store.fleetNow();
   // The job we just sent is already in the store, so it is not one of the
@@ -857,6 +859,8 @@ async function applySession(session) {
   await Promise.all([store.loadAll(route.slug), store.loadAsk(), store.loadHouse()]);
   store.subscribe();
   store.pollHost();
+  // Anything left waiting while the app was closed starts now, in the cloud.
+  store.wakeCloud({ force: true });
   // Usage and the agent ceiling ride the same timer as the host. Realtime on
   // `usage_windows` is a bonus; this poll is what keeps the meters honest,
   // and the ceiling can be raised from whichever device is in your hand.
@@ -866,6 +870,7 @@ async function applySession(session) {
     store.pollSettings();
     store.pollAssistant();
     store.pollHub();
+    store.wakeCloud();
   }, 10_000);
   tickTimer = startTicker();
   if (inThread()) scrollToEnd('auto');
@@ -891,6 +896,7 @@ document.addEventListener('visibilitychange', () => {
     store.loadAsk();
     store.loadHouse();
     store.pollHost();
+    store.wakeCloud({ force: true });
   }
 });
 

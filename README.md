@@ -32,6 +32,19 @@ and drives Claude Code lives on the PC, in its own repo.
 
 ## What it gives you
 
+- **Your PC can stay off** — when it is on, jobs run on it exactly as they
+  always did; when it is not, the cloud runner does the same work in
+  [Vercel Sandboxes](https://vercel.com/docs/vercel-sandbox) started by this
+  same deployment, signed in with your Claude subscription. Queue a job from
+  the bus and it starts in seconds; ask something in `#/ask` and Claude
+  answers, with your projects, the dashboard and the house as tools. Each
+  project keeps its own workspace, so the next job on it carries on where the
+  last one stopped. See [Without your PC: the cloud runner](#without-your-pc-the-cloud-runner).
+- **It remembers** — every job keeps a `CLAUDE.md` in the project up to date
+  (what it is, how to run it, the decisions, what was done when), a
+  follow-up continues the project's last Claude session, and a fresh session
+  is told what was asked before and what came of it. See
+  [How it remembers](#how-it-remembers).
 - **Home** — one hero figure (agents running right now) over the line that says
   what the lead agent is doing this second, the live runs, the limit that will
   stop you first, what to do next, and four counts with their context. The rest
@@ -139,10 +152,13 @@ Vercel serves the repo root from its CDN — nothing to wake up, so it opens as
 fast cold as warm. `.vercelignore` keeps the bridge, tests and tools out of
 what's published. To deploy by hand: `npx vercel --prod`.
 
-**It needs no secrets.** `config.js` is publishable by design — the anon key
-only grants what row-level security allows — so there are no environment
-variables to set. Pointing a deployment at a different Supabase project means
-editing `config.js`, because a static file is read by the browser.
+**The page needs no secrets.** `config.js` is publishable by design — the
+anon key only grants what row-level security allows. Pointing a deployment at
+a different Supabase project means editing `config.js`, because a static file
+is read by the browser. The one function here, `api/runner.js`, does hold
+secrets — the [cloud runner](#without-your-pc-the-cloud-runner)'s — as Vercel
+environment variables, which never reach the browser; without them it says
+what is missing and the dashboard behaves exactly as it did before.
 
 The assistant needs nothing here either. Its bridge runs on your PC and talks
 *outward* to Supabase, so a deployment of this app never holds a key for it,
@@ -154,6 +170,154 @@ Open the URL, then **Add to Home Screen**. Sign in *inside that app* — on iOS 
 home-screen install gets its own storage, separate from Safari, so a session
 created in the browser is not visible to it. If storage is blocked entirely
 (Private tabs do this), the sign-in screen says so rather than silently failing.
+
+## Without your PC: the cloud runner
+
+Everything on this dashboard used to need one machine to be awake: the PC
+runner claimed the jobs, and the bridge on the same PC answered `#/ask`. The
+cloud runner is the same two jobs done somewhere that is always reachable,
+paid for by the free tier of a service this app already deploys to.
+
+```
+┌──────────┐  1 insert   ┌──────────┐            ┌────────────────────────┐
+│ this app │ ──────────▶ │ Supabase │ ◀────────▶ │  Vercel Sandbox        │
+│  (phone) │  2 "wake"   └──────────┘  4 claim,  │  cr-job-<project>      │
+│          │ ──────┐                     stream, │  ├ host/runner.mjs     │
+└──────────┘       ▼                     finish  │  └ claude -p, git      │
+          ┌────────────────┐  3 start            └───────────┬────────────┘
+          │ api/runner.js  │ ──────────────────────────────▶ │
+          │ Vercel Function│ ◀────────────────────────────── ┘ 5 "done": stop me
+          └────────────────┘                                   (disk is kept)
+```
+
+1. You queue a job or send a message. The row goes into Supabase exactly as
+   before, so the PC runner can still take it if it is awake.
+2. The dashboard nudges `api/runner.js`, signed in as you (it refuses anyone
+   else, even another account on the same Supabase project).
+3. The function first asks whether your PC is awake — whether the PC runner
+   has checked in within the last 30 seconds, the same rule the topbar uses.
+   If it is, the job is left for the PC and nothing else here happens. If it
+   is not, the function claims what may run — under the same rules the Agents
+   screen describes: your ceiling, one agent per project, your usage cap — and
+   starts a sandbox for each. It returns at once; it holds no queue of its own.
+4. In the sandbox, `host/runner.mjs` fetches the project, runs Claude Code
+   headless with your subscription token, and writes the log, the activity
+   line, the usage meters and the result into the same rows the PC runner
+   uses. The dashboard cannot tell the two runners apart and does not need to.
+5. When it finishes it pushes to GitHub and rings the function back, which
+   stops the sandbox. Stopping snapshots its disk — the clone, `node_modules`,
+   Claude's saved sessions — and the next job on that project resumes from it
+   in under a second.
+
+**One sandbox per project**, named `cr-job-<project>`, plus `cr-ask` for the
+Ask tab. A new project is named from your prompt (`Build me a pomodoro timer`
+→ `pomodoro-timer`), created on GitHub when its first run finishes, private
+unless you chose public.
+
+**The Ask tab is Claude.** Not the 8B model on the PC: Claude Code, in its
+own sandbox, with `bridge/tools.mjs` as its way into the dashboard
+(`dashboard_status`, `job_details`, `list_projects`, `queue_job`,
+`house_status`, `house_control`), the web, and read access to your repos. It
+is told not to edit project code from a chat — it queues a job instead, so
+the work gets an agent, a log and a thread like any other. House commands go
+through the relay on the hub, the same queue a tap uses, so "turn the
+kitchen light off" works with the PC off too. It lingers five minutes after
+an answer so a follow-up is instant, then sleeps; the next message wakes it.
+
+**What a sandbox holds.** Your keys reach the one command that runs the
+runner, never the sandbox's saved configuration. A coding job's Claude gets
+the subscription token (it needs it to think) and GitHub access as a git
+header, and never the database key; the Ask tab's Claude also gets the
+database key, because its dashboard tools are how it reads your jobs and
+queues new ones. The callback secret stays with the runner.
+
+**Jobs: your PC first.** While the PC runner is checking in, every new job
+is its, as before. A job sent in the few seconds after the PC went to sleep
+would be left for a PC that will never claim it, so the function looks once
+more 40 seconds later, after the PC's heartbeat has gone stale, and takes the
+job then if it is still waiting. A job the cloud has already started — one
+paused for usage, say — finishes in the cloud even if the PC wakes up,
+because its Claude session lives in that sandbox. Claims are on the row's
+status, so a job runs exactly once whichever way it goes. A project that
+exists only as a folder on the PC always waits for the PC. `PC_FIRST=0` sends
+everything to the cloud instead.
+
+**The Ask tab: Claude, PC on or off.** The PC's assistant is the small local
+model, so the bridge stands aside for Claude: while Claude's heartbeat is
+fresh it claims nothing, and while Claude sleeps it only answers a message
+Claude has left waiting for 45 seconds. `ASSISTANT_DEFER=0` turns that off.
+
+### How it remembers
+
+Three layers, from most to least durable — every job the cloud runs uses all
+three. A job your PC runs gets the first one for free (Claude Code reads
+`CLAUDE.md` wherever it runs), but not the other two, nor the instruction to
+keep `CLAUDE.md` current: the PC runner is its own program, outside this repo.
+
+| | Where it lives | What it gives the next run |
+|---|---|---|
+| `CLAUDE.md` | in the repo, committed and pushed | What the project is, how to run, test and deploy it, the code's layout, decisions and why, known problems, and a dated "Recent work" list. Every job is told to keep it current and under ~150 lines. Claude Code loads it at the start of every session — in the cloud, on the PC runner, and in your editor |
+| the last session | the project's sandbox | A follow-up resumes the project's previous Claude session (up to `SESSION_DAYS`, default 7), so "now make the button blue" knows which button. If the session is gone, it starts fresh rather than failing |
+| the history | Supabase | A fresh session is handed the project's last six prompts and what came of each — the summary, or why it failed |
+
+The Ask tab has its own: a `CLAUDE.md` in its sandbox that Claude keeps as a
+running note of what it has learned about you and your projects, and a
+session per conversation, so a thread picks up where it left off.
+
+Each job is also told that nobody is watching: decide rather than ask, say
+what was assumed, check the work by actually running it, and finish with a
+short, concrete summary for a phone.
+
+### Setting it up
+
+```sh
+npm run cloud:setup
+```
+
+It reads which settings the Vercel project already has, fills in what it can
+on its own, asks for the rest, and stores each one with `vercel env add`
+after you say yes. Run it again whenever; it only asks about what is missing.
+
+| Setting | What it is | Where it comes from |
+|---|---|---|
+| `SUPABASE_URL` | your project | `config.js` |
+| `SUPABASE_SERVICE_KEY` | the secret key, so the runner can write the log | Supabase → Settings → API keys (the PC runner's `.env` has it too) |
+| `OWNER_ID` | the only account it will work for | found from your jobs |
+| `CLAUDE_CODE_OAUTH_TOKEN` | a year-long token for your Claude subscription | `claude setup-token` |
+| `GH_TOKEN` | clone, push, create repos | `gh auth token`, or a classic token with `repo` |
+| `GITHUB_OWNER` | your GitHub account | `gh` |
+| `RUNNER_SECRET`, `CRON_SECRET` | how sandboxes and the cron prove themselves | generated |
+| `OWNER_NAME` | what Claude calls you | optional |
+
+Then deploy (push to `main`). `GET /api/runner` says whether it is set up —
+setting names only, never values — and the topbar reads **cloud · asleep**
+once it is. Optional: `JOB_MODEL` / `CHAT_MODEL` (Claude Code's default
+otherwise), `SANDBOX_MINUTES` (45), `SANDBOX_VCPUS` (2), `SESSION_DAYS` (7),
+`CHAT_LINGER_MIN` (5), `ASSISTANT_NAME` (Claude), `PC_FIRST` (on; `0` sends
+every job to the cloud), `PC_RECHECK_MS` (40000).
+
+### What it costs, and where it stops
+
+- **Claude**: your subscription, the same windows the meters show — and the
+  runner now keeps those meters current itself, from what Claude Code reports
+  as it works. A job that hits the limit pauses until the window resets rather
+  than failing; one over its own usage cap waits before it starts.
+- **Vercel, on Hobby**: no charge — past the included usage, sandboxes stop
+  starting until the month resets. Included: 5 hours of *active* CPU (time
+  spent waiting on the model does not count), 420 GB-hours of memory (about
+  100 hours of a 2-vCPU sandbox), 5,000 sandbox starts, 10 at once.
+- **45 minutes per sandbox session on Hobby.** A longer job is stopped four
+  minutes early, its session saved, and picked straight back up in a fresh
+  session — so long jobs work, in 45-minute pieces. Pro allows 24 hours
+  (`SANDBOX_MINUTES`).
+- **Resuming after a usage limit** happens the next time something nudges the
+  function: opening the dashboard, sending anything, or the daily cron (Hobby
+  allows one a day).
+- **The sandbox is Ubuntu with Node 24, Python, git and Claude Code.** A
+  project that needs something else (a .NET SDK, say) has to install it as
+  part of the job; the sandbox keeps it for next time.
+- **Only GitHub projects.** A folder that exists only on the PC stays with
+  the PC runner.
 
 ## Your own assistant
 
@@ -816,7 +980,7 @@ project, it just has less to say about each.
 ## Tests
 
 ```sh
-npm test            # contrast guard, the app in jsdom, then the bridge
+npm test            # contrast guard, the app in jsdom, the cloud runner, then the bridge
 npm run contrast    # just the colour claims
 ```
 
@@ -907,6 +1071,19 @@ The Supabase CDN import is swapped for a local fake by a Node module loader
 (`test/loader.mjs`), so the app runs in the test exactly as the browser loads
 it — there is no test-only seam in the app code.
 
+`test/host.mjs` does for the cloud runner what `test/bridge.mjs` does for the
+bridge: the real code against stand-ins. `plan` and every word Claude is told
+are checked against fixed inputs; `dispatch` claims against an in-memory
+PostgREST with a fake Vercel Sandbox (the ceiling, one agent per project, a
+PC-only folder left alone, a second wake starting nothing twice, a dead
+sandbox's job picked back up); and `host/runner.mjs` runs as a real process
+with `test/fake-claude.mjs` as `claude` and a bare git repository as GitHub —
+so a job really is cloned, committed and pushed, a follow-up really resumes
+the session, a lost session falls back to the history, and a stop, a usage
+limit and a session running out of time each end the way they should. The
+Ask tab is checked the same way: streamed, paragraphed after a tool call, and
+resumed in the same thread.
+
 ## Looking at the design
 
 ```sh
@@ -976,7 +1153,16 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `bridge/run-at-logon.ps1` | Registers the bridge as a Windows task. You run it |
 | `bridge/keep-up.mjs` | What that task runs: the bridge, restarted if it stops, logged to `bridge.log` |
 | `bridge/tools.mjs` | The dashboard as tools for your assistant: status, a job's detail, projects, queueing a job, and the house |
-| `vercel.json`, `.vercelignore` | How Vercel serves it: no build, the repo root, minus what only runs elsewhere |
+| `vercel.json`, `.vercelignore` | How Vercel serves it: no build, the repo root, minus what only runs elsewhere, plus the one function and its daily cron |
+| `api/runner.js` | The cloud runner's front door: wakes on your say-so, starts sandboxes, stops them when they ring back |
+| `host/dispatch.mjs` | What to start: the same ceiling, project and usage rules as `fleet.js`, claimed on the row. `plan` is pure |
+| `host/sandboxes.mjs` | Vercel Sandbox: a persistent sandbox per project, the runner started detached inside it |
+| `host/runner.mjs` | Runs in the sandbox: one job, or the Ask tab. Writes the same rows the PC runner does |
+| `host/claude.mjs` | Claude Code headless: the flags, and its stream read line by line |
+| `host/memory.mjs` | Everything Claude is told, and the three layers of memory. Pure |
+| `host/git.mjs` | Clone, commit, push, create a repo — with the token as a header, never on disk |
+| `host/setup.mjs` | `npm run cloud:setup`: the settings, one question at a time |
+| `test/host.mjs` | The cloud runner against stand-ins: a fake PostgREST, a fake `claude`, a bare repo as GitHub |
 
 ## Data it expects
 

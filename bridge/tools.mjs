@@ -51,7 +51,7 @@ const line = (j) => `- [${j.id}] ${where(j)} — "${clip(j.prompt, 90)}"`;
 
 const TOOLS = {
   dashboard_status: {
-    description: 'What the dashboard shows right now: whether the PC runner is online, coding jobs '
+    description: 'What the dashboard shows right now: which runners are online (the cloud one and the PC), coding jobs '
       + 'running, queued or paused, the most recent finished and failed ones, and usage windows.',
     parameters: { type: 'object', properties: {} },
     note: 'checking your dashboard',
@@ -59,14 +59,19 @@ const TOOLS = {
       const [jobs, usage, hosts] = await Promise.all([
         api('/jobs?select=id,prompt,project_slug,status,created_at,claimed_at,error,live_url&order=created_at.desc&limit=40'),
         api('/usage_windows?select=window_type,pct,resets_at'),
-        api('/hosts?select=name,last_seen&order=last_seen.desc&limit=1'),
+        api('/hosts?select=name,last_seen&order=last_seen.desc&limit=5'),
       ]);
       const out = [];
-      const host = hosts?.[0];
-      if (!host) out.push('PC runner: has never checked in.');
+      if (!hosts?.length) out.push('Runners: none has ever checked in.');
       else {
-        const fresh = Date.now() - new Date(host.last_seen) < 30_000;
-        out.push(`PC runner: ${fresh ? 'online' : 'offline'} (${host.name}, last seen ${ago(host.last_seen)}).`);
+        // The cloud runner sleeps between jobs and is started for each one,
+        // so "not checked in lately" means asleep there, not off.
+        out.push(`Runners: ${hosts.map((h) => {
+          const fresh = Date.now() - new Date(h.last_seen) < 30_000;
+          const cloud = h.name === (process.env.HOST_NAME || 'cloud');
+          return `${h.name} ${fresh ? 'working now' : cloud ? 'asleep (starts on its own when a job is queued)' : 'offline'}`
+            + `${fresh ? '' : `, last seen ${ago(h.last_seen)}`}`;
+        }).join('; ')}.`);
       }
       const all = jobs ?? [];
       for (const status of ['running', 'paused', 'queued']) {
@@ -254,9 +259,9 @@ const TOOLS = {
       if ((act === 'level' || act === 'temperature') && clampValue(act, value) == null) {
         throw new Error(`"${act}" needs a number — 0-100 for level, degrees for temperature.`);
       }
-      if (!ha.configured()) {
-        throw new Error('This PC has no hub configured. Set HA_URL and HA_TOKEN in bridge/.env.');
-      }
+      // Without the hub on this network (the cloud runner has none), the
+      // relay on the hub does it: the same queue a tap on the dashboard uses.
+      const relayed = !ha.configured();
 
       const { devices } = await readHouse();
       if (!devices.length) throw new Error(houseMissing('the hub'));
@@ -287,6 +292,8 @@ const TOOLS = {
       if (targets.length > 12) {
         throw new Error(`That would change ${targets.length} things at once. Narrow it down.`);
       }
+
+      if (relayed) return viaRelay(targets, { act, value, assumed: assumed === 'light' && !kind });
 
       const done = [];
       const failed = [];
@@ -417,6 +424,48 @@ const record = (cmd, { status, error = null }) =>
       updated_at: new Date().toISOString(),
     },
   }).catch(() => null);
+
+/**
+ * Hand the commands to the relay on the hub and wait for its answer, as a
+ * tap on the dashboard would. Each row says where it got to: done, refused,
+ * or still waiting because no relay is running.
+ */
+async function viaRelay(targets, { act, value, assumed }) {
+  const rows = await api('/house_commands', {
+    method: 'POST',
+    prefer: 'return=representation',
+    body: targets.map((d) => ({
+      owner: sb.owner,
+      entity_id: d.entity_id,
+      name: d.name ?? null,
+      action: act,
+      value: value ?? null,
+      source: 'assistant',
+      status: 'queued',
+    })),
+  });
+  const ids = (Array.isArray(rows) ? rows : []).map((r) => r.id).filter((id) => id != null);
+  if (!ids.length) throw new Error('Could not hand that to the hub relay.');
+
+  let now = [];
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    now = await api(`/house_commands?id=in.(${ids.join(',')})&select=id,name,status,error`).catch(() => []);
+    if (Array.isArray(now) && now.every((c) => c.status === 'done' || c.status === 'error')) break;
+  }
+  const done = now.filter((c) => c.status === 'done');
+  const failed = now.filter((c) => c.status === 'error');
+  const waiting = now.filter((c) => c.status !== 'done' && c.status !== 'error');
+  if (!done.length && failed.length) throw new Error(failed.map((c) => `${c.name}: ${c.error}`).join('; '));
+  const what = commandLabel({ action: act, value, name: (done.length ? done : targets).map((d) => d.name).join(', ') });
+  return [
+    done.length ? `Done — ${what}.` : '',
+    waiting.length ? `Queued for the hub — ${waiting.map((c) => c.name).join(', ')} will change when the `
+      + 'relay on the hub picks it up (it has not yet; is it running?).' : '',
+    failed.length ? `Failed: ${failed.map((c) => `${c.name}: ${c.error}`).join('; ')}` : '',
+    assumed ? '(Took "the room" to mean its lights.)' : '',
+  ].filter(Boolean).join('\n');
+}
 
 /** Read back what actually happened — a hub can refuse politely. */
 async function settled(devices) {

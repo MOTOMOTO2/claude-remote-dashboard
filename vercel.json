@@ -1,9 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "",
+  "installCommand": "npm install --omit=dev --no-audit --no-fund",
   "buildCommand": "",
   "outputDirectory": ".",
+  "functions": {
+    "api/runner.js": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/runner?action=cron", "schedule": "17 13 * * *" }
+  ],
   "headers": [
     {
       "source": "/sw.js",

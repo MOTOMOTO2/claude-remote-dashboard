@@ -32,10 +32,10 @@ const has = (label, haystack, needle) =>
 // Only the five request shapes the bridge makes, and only the `eq` filters
 // it uses — but the claim really is filtered, so the lock is really tested.
 
-function startFake({ messages, onPatch = () => {} }) {
+function startFake({ messages, onPatch = () => {}, assistants = [] }) {
   const state = {
     messages,
-    assistants: [],
+    assistants,
     requests: [],
   };
 
@@ -43,8 +43,10 @@ function startFake({ messages, onPatch = () => {} }) {
     .filter(([k]) => !['select', 'order', 'limit'].includes(k))
     .map(([k, v]) => [k, v.replace(/^eq\./, '')]);
 
-  const matches = (row, pairs) =>
-    pairs.every(([k, v]) => String(row[k] ?? '') === String(v));
+  // `lt.` too, for "only messages older than this" — the rest are equality.
+  const matches = (row, pairs) => pairs.every(([k, v]) => (v.startsWith('lt.')
+    ? Date.parse(row[k]) < Date.parse(v.slice(3))
+    : String(row[k] ?? '') === String(v)));
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -70,6 +72,7 @@ function startFake({ messages, onPatch = () => {} }) {
 
     if (req.method === 'GET') {
       if (table === 'chats') { send([{ owner: 'u1' }]); return; }
+      if (table === 'assistants') { send(state.assistants); return; }
       send(state.messages.filter((m) => matches(m, where)));
       return;
     }
@@ -143,8 +146,8 @@ const bridgeEnv = (port, cmd, extra = {}) => ({
 });
 
 /** Run the real bridge once against the fake, and hand back what it did. */
-async function runBridge({ messages, onPatch, cmd }) {
-  const { state, server, port } = await startFake({ messages, onPatch });
+async function runBridge({ messages, onPatch, cmd, assistants }) {
+  const { state, server, port } = await startFake({ messages, onPatch, assistants });
 
   const child = spawn(process.execPath, ['bridge/bridge.mjs', '--once'], {
     cwd: root,
@@ -193,6 +196,43 @@ ok('the answer is written more than once, so it reads as typing',
   writes.length >= 3, `${writes.length} writes`);
 ok('the last write is the one that finishes it',
   writes.at(-1).body.status === 'done');
+
+// ── 1b. Claude in the cloud is answering ──────────────────────────────
+// The cloud runner answers the same table with a better model. While its
+// heartbeat is fresh the PC claims nothing; while it sleeps, the PC only
+// takes what it has left waiting, and never writes over its name.
+
+const ago = (ms) => new Date(Date.now() - ms).toISOString();
+const aside = await runBridge({
+  messages: [asked, queued()],
+  assistants: [{ owner: 'u1', name: 'Claude', last_seen: ago(5_000) }],
+});
+ok('with Claude answering, the PC leaves the reply alone',
+  aside.state.messages.find((m) => m.id === 7).status === 'queued', aside.out);
+ok('and does not heartbeat over it', aside.state.assistants[0]?.name === 'Claude');
+has('and says why', aside.out, 'standing aside');
+
+const fresh = await runBridge({
+  messages: [asked, queued()],
+  assistants: [{ owner: 'u1', name: 'Claude', last_seen: ago(3_600_000) }],
+});
+ok('with Claude asleep, a brand-new message is left for it to wake to',
+  fresh.state.messages.find((m) => m.id === 7).status === 'queued', fresh.out);
+
+const left = await runBridge({
+  messages: [asked, queued({ created_at: ago(120_000) })],
+  assistants: [{ owner: 'u1', name: 'Claude', last_seen: ago(3_600_000) }],
+});
+ok('but one it left waiting is answered by the PC',
+  left.state.messages.find((m) => m.id === 7).status === 'done', left.out);
+ok('without taking over Claude\'s name', left.state.assistants[0]?.name === 'Claude');
+
+const gone = await runBridge({
+  messages: [asked, queued()],
+  assistants: [{ owner: 'u1', name: 'Claude', last_seen: ago(3 * 86_400_000) }],
+});
+ok('a cloud assistant silent for days is not waited for',
+  gone.state.messages.find((m) => m.id === 7).status === 'done', gone.out);
 
 // ── 2. stopping one mid-sentence ──────────────────────────────────────
 // The dashboard sets cancel_requested; the bridge is told by the response
@@ -404,7 +444,7 @@ async function tool(port, args, input = '') {
     listed.filter((t) => t.acts).map((t) => t.name).join() === 'queue_job,house_control');
 
   const status = await tool(port, ['call', 'dashboard_status'], '{}');
-  has('the status says whether the PC runner is up', status.out, 'PC runner: online (desktop');
+  has('the status says which runner is up', status.out, 'Runners: desktop working now');
   has('and what is running', status.out, 'Running (1):');
   has('and why the last failure failed', status.out, 'FAILED: npm install failed: ETARGET');
   has('with the latest failure named outright', status.out, 'Latest failure: - [b2] portfolio');

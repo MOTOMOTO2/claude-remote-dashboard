@@ -58,6 +58,12 @@ export const state = {
   commands: [],
   houseReady: false,
   houseError: null,
+  /**
+   * Whether this deployment has the cloud runner (api/runner.js): null until
+   * it has been asked, then true or false. When true, nothing being online
+   * means "asleep, and starting as soon as there is work", not "offline".
+   */
+  cloud: null,
   realtime: 'connecting',
   loading: true,
 };
@@ -80,6 +86,7 @@ export const fleetNow = () => fleet({
   jobs: jobList(),
   maxParallel: state.maxParallel,
   hostFresh: state.hostFresh,
+  wakes: state.cloud === true,
 });
 
 export const projectOf = (slug) => state.projects.find((p) => p.name === slug) ?? null;
@@ -416,6 +423,51 @@ export async function pollHost() {
   changed();
 }
 
+// ── the cloud runner ──────────────────────────────────────────────────
+// api/runner.js starts Vercel Sandboxes for whatever is waiting, so nothing
+// here needs your PC. It holds no queue of its own — Supabase is the queue —
+// so all it needs is a nudge: when you send something, when the app opens,
+// and now and then while something is waiting with nothing running it.
+
+let cloudAbsent = false;
+let lastWake = 0;
+
+/** Is anything waiting that a sleeping runner would need to be woken for? */
+export function wantsCloud(now = Date.now()) {
+  const due = (j) => j.status === 'queued'
+    || (j.status === 'paused' && (Date.parse(j.resume_at ?? '') || 0) <= now);
+  if (!state.hostFresh && jobList().some(due)) return true;
+  return askPending().length > 0 && !askPresence().online;
+}
+
+/**
+ * Ask the cloud runner to start whatever is waiting. Signed in as you, so
+ * nobody else can spend your sandboxes. Throttled unless `force`, and a
+ * deployment without the function (a local `npm run serve`) is asked once.
+ */
+export async function wakeCloud({ force = false } = {}) {
+  if (!sb || cloudAbsent) return null;
+  if (!force && (Date.now() - lastWake < 20_000 || (state.cloud !== null && !wantsCloud()))) return null;
+  lastWake = Date.now();
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return null;
+  try {
+    const res = await fetch('api/runner', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ action: 'wake' }),
+    });
+    const body = res.headers.get('content-type')?.includes('json') ? await res.json().catch(() => null) : null;
+    const was = state.cloud;
+    if (!body) cloudAbsent = true;           // a static host: no function here
+    state.cloud = Boolean(body?.configured);
+    if (state.cloud !== was) changed();
+    return body;
+  } catch {
+    return null;                             // offline: the next nudge will do
+  }
+}
+
 // ── mutations ─────────────────────────────────────────────────────────
 
 export async function createJob({ prompt, slug, visibility, effort, cap }) {
@@ -434,6 +486,7 @@ export async function createJob({ prompt, slug, visibility, effort, cap }) {
   if (res.data?.id) {
     state.jobs.set(res.data.id, res.data);
     changed();
+    wakeCloud({ force: true });
   }
   return res;
 }
@@ -588,6 +641,7 @@ export async function askAssistant({ chatId, text }) {
   if (reply.data) takeMessage(reply.data);
   touchConversation(id);
   changed();
+  if (reply.data) wakeCloud({ force: true });
   return { error: reply.error ?? null, chatId: id, reply: reply.data ?? null };
 }
 
@@ -603,6 +657,7 @@ export async function askAgain(id) {
     const row = state.chatMessages.find((m) => String(m.id) === String(id));
     if (row) Object.assign(row, patch);
     changed();
+    wakeCloud({ force: true });
   }
   return res;
 }

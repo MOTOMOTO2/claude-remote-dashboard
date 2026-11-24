@@ -9,3 +9,4 @@ bridge/bridge.log*
 bridge/addon/relay/
 .vercel
 .env*.local
+.env*

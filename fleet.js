@@ -30,6 +30,7 @@ export const WAIT_REASON = {
   project: 'waiting for its own project',
   slot: 'waiting for a free slot',
   host: 'waiting for your desktop',
+  wake: 'starting in the cloud',
   next: 'next up',
 };
 
@@ -39,8 +40,10 @@ export const WAIT_REASON = {
  * @param jobs        every job row (any status)
  * @param maxParallel the published ceiling
  * @param hostFresh   whether a desktop checked in recently
+ * @param wakes       whether a cloud runner starts on demand (api/runner.js),
+ *                    so nothing being up yet is not something to wait for
  */
-export function fleet({ jobs = [], maxParallel = DEFAULT_SLOTS, hostFresh = false } = {}) {
+export function fleet({ jobs = [], maxParallel = DEFAULT_SLOTS, hostFresh = false, wakes = false } = {}) {
   const max = clampSlots(maxParallel);
   const running = jobs.filter((j) => j.status === 'running').sort(oldest);
   const paused = jobs.filter((j) => j.status === 'paused').sort(oldest);
@@ -60,10 +63,10 @@ export function fleet({ jobs = [], maxParallel = DEFAULT_SLOTS, hostFresh = fals
     let reason;
     if (mine && busy.has(mine)) reason = 'project';
     else if (taken >= max) reason = 'slot';
-    else reason = hostFresh ? 'next' : 'host';
+    else reason = hostFresh ? 'next' : wakes ? 'wake' : 'host';
 
     // Only a job that would start now takes a slot from the ones behind it.
-    if (reason === 'next' || reason === 'host') {
+    if (reason === 'next' || reason === 'host' || reason === 'wake') {
       taken += 1;
       if (mine) busy.add(mine);
     }

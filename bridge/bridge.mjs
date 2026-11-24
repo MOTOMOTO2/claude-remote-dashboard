@@ -183,8 +183,37 @@ async function findOwner() {
 
 // ── the loop ──────────────────────────────────────────────────────────
 
+// Claude in the cloud (host/runner.mjs, started by api/runner.js) answers
+// the same messages from the same table, and it is the better answer. So
+// when its heartbeat is in the row this bridge stands aside:
+//   · Claude checked in under 30s ago — it is answering; claim nothing.
+//   · it checked in within the last day — it sleeps between conversations
+//     and is woken for each one, so give it a head start and only answer a
+//     message it has left waiting; and do not heartbeat over its name.
+//   · nothing from it for a day — it is not set up here; carry on as before.
+// ASSISTANT_DEFER=0 turns all of this off.
+const DEFER = env.ASSISTANT_DEFER !== '0';
+const HEAD_START_MS = Number(env.ASSISTANT_HEAD_START_MS ?? 45_000);
+
+async function cloudAssistant() {
+  if (!DEFER) return 'none';
+  const rows = await api(`/assistants?owner=eq.${encodeURIComponent(owner)}&select=name,last_seen`)
+    .catch(() => null);
+  const row = rows?.[0];
+  if (!row || row.name === CONFIG.name) return 'none';
+  const age = Date.now() - (Date.parse(row.last_seen) || 0);
+  if (age < 30_000) return 'answering';
+  // A sleeping cloud assistant writes a heartbeat an hour stale on its way
+  // out, so "within a day" is measured from there.
+  if (age < 25 * 3600_000) return 'asleep';
+  return 'none';
+}
+
+let standingAside = '';
+
 /** Say hello, so the dashboard can tell you the assistant is awake. */
 async function beat() {
+  if ((await cloudAssistant()) !== 'none') return;
   await api('/assistants', {
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',
@@ -199,8 +228,17 @@ async function beat() {
 
 /** The oldest message waiting for an answer, claimed so nobody else takes it. */
 async function claim() {
+  const cloud = await cloudAssistant();
+  if (cloud !== standingAside) {
+    if (cloud === 'answering') log('Claude is answering from the cloud; standing aside');
+    else if (cloud === 'asleep') log('Claude answers from the cloud; this PC only picks up what it leaves waiting');
+    standingAside = cloud;
+  }
+  if (cloud === 'answering') return null;
+  const before = cloud === 'asleep'
+    ? `&created_at=lt.${encodeURIComponent(new Date(Date.now() - HEAD_START_MS).toISOString())}` : '';
   const queued = await api(
-    '/chat_messages?role=eq.assistant&status=eq.queued&order=created_at.asc&limit=1',
+    `/chat_messages?role=eq.assistant&status=eq.queued${before}&order=created_at.asc&limit=1`,
   );
   const next = queued?.[0];
   if (!next) return null;

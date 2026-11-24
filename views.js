@@ -116,7 +116,7 @@ export function renderTopbar() {
       n ? plural(n, 'message') : 'no messages yet',
     ].filter(Boolean).join(' · ');
   } else if (route.view === 'pending') {
-    sub = 'waiting for your desktop to name it';
+    sub = state.cloud ? 'starting in the cloud' : 'waiting for your desktop to name it';
   } else if (route.view === 'agents') {
     const f = fleetNow();
     sub = [
@@ -148,18 +148,24 @@ export function renderTopbar() {
   const { host, hostFresh } = state;
   pill.classList.toggle('online', hostFresh);
   pill.classList.toggle('offline', !hostFresh);
-  const hostWord = host ? (hostFresh ? host.name : `${host.name} · off`) : 'no desktop';
+  const hostWord = hostFresh ? host.name
+    : state.cloud ? 'cloud · asleep'
+      : host ? `${host.name} · off` : 'no desktop';
   $('host-name').textContent = hostWord;
   // On a narrow screen the name is hidden to give the title its width back,
   // so the button has to carry it some other way.
-  pill.setAttribute('aria-label', `Desktop: ${hostWord}`);
+  pill.setAttribute('aria-label', `Runner: ${hostWord}`);
   pill.title = hostWord;
 }
 
 export function hostExplainer() {
   const feed = state.realtime === 'live' ? '' : ' · live updates reconnecting';
-  if (!state.host) return `No desktop has ever checked in. Start the runner on your PC.${feed}`;
   if (state.hostFresh) return `${state.host.name} is online — jobs start right away.${feed}`;
+  if (state.cloud) {
+    return 'The cloud runner sleeps when nothing is queued and starts within seconds of '
+      + `anything you send — your PC can stay off.${feed}`;
+  }
+  if (!state.host) return `No desktop has ever checked in. Start the runner on your PC.${feed}`;
   return `${state.host.name} last checked in ${ago(state.host.last_seen)} ago. `
     + `Jobs will queue until it boots.${feed}`;
 }
@@ -499,10 +505,11 @@ const suggestionHtml = (s) => `
 /** The new-project view, where knowing there is room for another matters. */
 export function renderNewIntro() {
   const f = fleetNow();
+  const who = state.cloud ? 'The cloud runner' : 'Your desktop';
   const room = f.free
-    ? `${plural(f.free, 'slot')} free of ${f.max} — it starts as soon as your desktop sees it.`
+    ? `${plural(f.free, 'slot')} free of ${f.max} — it starts as soon as ${who.toLowerCase()} sees it.`
     : `All ${plural(f.max, 'slot')} are busy, so this one queues behind them.`;
-  $('new-intro').textContent = `Describe what to build. Your desktop picks it up, `
+  $('new-intro').textContent = `Describe what to build. ${who} picks it up, `
     + `creates the repo, writes the code, and pushes it. ${room}`;
 }
 
@@ -785,7 +792,7 @@ export function slotsSentence() {
       + `no ceiling for your desktop to claim against and it works to its own.`
     : !state.slotsPublished
       ? `Not published yet — tap a number to tell your desktop it may run ${many}.`
-      : `Your desktop runs ${many}, one per project.`;
+      : `${state.cloud ? 'The cloud runner' : 'Your desktop'} runs ${many}, one per project.`;
   return `${claim} ${f.used} in flight, ${plural(f.free, 'slot')} free.`;
 }
 
@@ -796,6 +803,7 @@ function shortWait(job) {
   if (w.reason === 'project') return `behind ${w.job.project_slug}`;
   if (w.reason === 'slot') return w.ahead ? `${w.ahead} ahead` : 'for a slot';
   if (w.reason === 'host') return 'no desktop';
+  if (w.reason === 'wake') return 'starting';
   return 'next up';
 }
 
@@ -805,6 +813,7 @@ function waitLabel({ reason, job, label }) {
   if (reason === 'host') {
     return state.host ? 'your desktop is offline' : 'no desktop has checked in';
   }
+  if (reason === 'wake') return 'starting in the cloud — a few seconds';
   if (reason === 'next') return 'next up — claimed within seconds';
   return label;
 }
@@ -895,7 +904,7 @@ export function renderAgents() {
   if (f.paused.length) chips.push(chip('paused', `<b>${f.paused.length}</b> paused for usage`));
   if (f.blocked) chips.push(chip('queued', `<b>${f.blocked}</b> waiting for a slot`));
   if (f.over) chips.push(chip('paused', `<b>${f.over}</b> over the ceiling`));
-  if (!state.hostFresh) chips.push(chip('paused', 'desktop offline'));
+  if (!state.hostFresh && !state.cloud) chips.push(chip('paused', 'desktop offline'));
   $('fleet-chips').innerHTML = chips.join('');
 
   for (const el of document.querySelectorAll('#slots input[name="slots"]')) {
@@ -991,7 +1000,9 @@ export function renderHome() {
   }
   if (paused.length) chips.push(chip('paused', `<b>${paused.length}</b> paused for usage`));
   if (f.blocked) chips.push(chip('queued', `<b>${f.blocked}</b> waiting for a slot`));
-  else if (queued.length) chips.push(chip('queued', `<b>${queued.length}</b> waiting on desktop`));
+  else if (queued.length) {
+    chips.push(chip('queued', `<b>${queued.length}</b> ${state.cloud ? 'starting' : 'waiting on desktop'}`));
+  }
   if (!active.length && !bare) {
     chips.push(`<span class="stat-chip">Nothing in progress</span>`);
   }
@@ -1003,7 +1014,7 @@ export function renderHome() {
     chips.push(`<a class="stat-chip" data-status="error" href="${esc(jobHref(lastSettled))}"
       title="${esc(SIGNED_OUT_FIX)}"><i class="dot"></i>desktop signed out — run /login</a>`);
   }
-  if (!state.hostFresh && !bare) {
+  if (!state.hostFresh && !bare && !state.cloud) {
     chips.push(`<span class="stat-chip" data-status="paused"><i class="dot"></i>desktop offline</span>`);
   }
   $('hero-chips').innerHTML = chips.join('');
@@ -1070,10 +1081,11 @@ function desktopHtml() {
   const feed = { live: 'live', error: 'reconnecting', connecting: 'connecting' }[realtime]
     ?? realtime;
   const rows = [
-    ['Desktop', host ? esc(host.name) : 'none has checked in'],
-    ['State', host
+    ['Runner', host ? esc(host.name) : state.cloud ? 'cloud' : 'none has checked in'],
+    ['State', host || state.cloud
       ? `<span class="state" data-status="${hostFresh ? 'done' : 'queued'}">
-           <i class="dot${hostFresh ? ' live' : ''}"></i>${hostFresh ? 'online' : 'offline'}</span>`
+           <i class="dot${hostFresh ? ' live' : ''}"></i>${hostFresh ? 'online'
+             : state.cloud ? 'asleep' : 'offline'}</span>`
       : `<span class="state" data-status="error"><i class="dot"></i>never seen</span>`],
     ['Last checked in', host
       ? `<span data-since="${esc(host.last_seen)}">${since(host.last_seen)}</span>`
@@ -1081,10 +1093,11 @@ function desktopHtml() {
     ['Live updates', `<span class="state" data-status="${realtime === 'live' ? 'done' : 'paused'}">
        <i class="dot"></i>${esc(feed)}</span>`],
   ];
-  const note = !host
-    ? 'Start the runner on your PC and it will claim queued jobs.'
-    : hostFresh ? 'Anything you send starts right away.'
-      : 'Jobs you send will sit in the queue until it boots.';
+  const note = hostFresh ? 'Anything you send starts right away.'
+    : state.cloud ? 'The cloud runner starts within seconds of anything you send, '
+      + 'with your PC on or off. Each project keeps its own workspace between runs.'
+      : !host ? 'Start the runner on your PC and it will claim queued jobs.'
+        : 'Jobs you send will sit in the queue until it boots.';
 
   return rows.map(([k, v]) => `
     <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
@@ -1105,6 +1118,7 @@ const REPLY_STATUS = {
   queued: 'queued',
   offline: 'paused',    // waiting on something outside the app is amber
   never: 'paused',
+  waking: 'running',    // starting up is work in progress
   failed: 'error',
   done: 'done',
 };
@@ -1119,8 +1133,9 @@ export function currentConversation() {
 /** The word on the pill. Four states, because "offline" hides two of them. */
 function presenceWord(who) {
   if (!state.askReady) return 'not set up';
-  if (!who.known) return 'no assistant yet';
   if (who.online) return 'online';
+  if (state.cloud) return 'in the cloud · wakes when you ask';
+  if (!who.known) return 'no assistant yet';
   return `last seen ${ago(who.lastSeen)} ago`;
 }
 
@@ -1130,6 +1145,10 @@ export function askExplainer() {
   if (!state.askReady) {
     return 'The conversation tables are not in your Supabase project yet. Run '
       + 'bridge/schema.sql, then start the bridge on your PC.';
+  }
+  if (state.cloud && !who.online) {
+    return 'Claude answers from the cloud, with your projects, the dashboard and the house to '
+      + 'hand. It sleeps between conversations and wakes in a few seconds when you ask.';
   }
   if (!who.known) {
     return 'No assistant has ever checked in. Run the bridge on your PC and it shows '
@@ -1215,6 +1234,7 @@ function askReplyHtml(message, { who, queue }) {
     online: who.online,
     known: who.known,
     ahead: Math.max(0, spot),
+    wakes: state.cloud === true,
   });
   const status = REPLY_STATUS[st.kind] ?? 'queued';
   const live = isPending(message);
@@ -1324,7 +1344,11 @@ export function renderAsk() {
   $('ask-open').hidden = !blank;
   if (blank) {
     $('ask-starters').innerHTML = STARTERS.map(starterHtml).join('');
-    $('ask-open-p').textContent = who.online
+    $('ask-open-p').textContent = state.cloud
+      ? 'Claude answers from the cloud, with your projects, the dashboard and the house to '
+        + 'hand — your PC can be off. It remembers what you tell it, and each conversation '
+        + 'picks up where it left off.'
+      : who.online
       ? `${who.name} is awake on your PC right now — ask it something and the answer `
         + 'comes back here.'
       : 'It answers on your PC and the reply comes back here. Ask anyway if the PC is '
@@ -1357,7 +1381,8 @@ export function renderAskHome() {
     ['Assistant', who.known ? esc(who.name) : 'none has checked in'],
     ['State', who.known
       ? `<span class="state" data-status="${who.online ? 'done' : 'paused'}">
-           <i class="dot${who.online ? ' live' : ''}"></i>${who.online ? 'online' : 'offline'}</span>`
+           <i class="dot${who.online ? ' live' : ''}"></i>${who.online ? 'online'
+             : state.cloud ? 'asleep' : 'offline'}</span>`
       : '<span class="state" data-status="error"><i class="dot"></i>never seen</span>'],
     ['Last heard', who.lastSeen
       ? `<span data-since="${esc(who.lastSeen)}">${since(who.lastSeen)}</span>`
@@ -1899,12 +1924,12 @@ export function renderPending(job) {
       <div class="msg you">${esc(job.prompt)}</div>
       ${replyHtml(job)}
     </div>
-    <p class="empty-note center">Your desktop names the project as soon as it
-      picks this up, then this turns into its chat.</p>`
+    <p class="empty-note center">${state.cloud ? 'The cloud runner' : 'Your desktop'} names the
+      project as soon as it picks this up, then this turns into its chat.</p>`
     : `
     <div class="empty">
       ${icon('spark', 'empty-art')}
       <h3>Starting…</h3>
-      <p>Waiting for your desktop to pick this up.</p>
+      <p>${state.cloud ? 'Starting in the cloud.' : 'Waiting for your desktop to pick this up.'}</p>
     </div>`;
 }
