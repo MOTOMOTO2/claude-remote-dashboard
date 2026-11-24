@@ -64,6 +64,10 @@ export const state = {
    * means "asleep, and starting as soon as there is work", not "offline".
    */
   cloud: null,
+  /** Why the cloud runner refused the last wake, if it did. */
+  cloudRefused: null,
+  /** jobId -> why the cloud runner left that job waiting ('cap', 'pc-only', 'pc'). */
+  cloudWhy: new Map(),
   realtime: 'connecting',
   loading: true,
 };
@@ -458,10 +462,15 @@ export async function wakeCloud({ force = false } = {}) {
       body: JSON.stringify({ action: 'wake' }),
     });
     const body = res.headers.get('content-type')?.includes('json') ? await res.json().catch(() => null) : null;
-    const was = state.cloud;
     if (!body) cloudAbsent = true;           // a static host: no function here
-    state.cloud = Boolean(body?.configured);
-    if (state.cloud !== was) changed();
+    // Only a wake that was let in makes "starting in the cloud" true. A
+    // refused one is a setup problem, and the screen says so instead.
+    state.cloud = Boolean(res.ok && body?.configured);
+    state.cloudRefused = res.status === 401 ? (body?.refused || 'the cloud runner refused this account') : null;
+    state.cloudWhy = new Map((body?.skipped ?? [])
+      .filter((x) => ['cap', 'pc-only', 'pc'].includes(x.why))
+      .map((x) => [String(x.id), x.why]));
+    changed();
     return body;
   } catch {
     return null;                             // offline: the next nudge will do

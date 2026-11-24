@@ -623,7 +623,8 @@ try {
   const fake = await startFake({});
   const saved = { ...process.env };
   Object.assign(process.env, {
-    SUPABASE_URL: fake.url, SUPABASE_SERVICE_KEY: 'svc', OWNER_ID: 'u1', RUNNER_SECRET: 'shh',
+    // With the line breaks `vercel env add` keeps from piped input.
+    SUPABASE_URL: `${fake.url}\n`, SUPABASE_SERVICE_KEY: 'svc\n', OWNER_ID: 'u1\n', RUNNER_SECRET: 'shh\n',
     GH_TOKEN: 'gh', CLAUDE_CODE_OAUTH_TOKEN: 'tok', RUNNER_REPO: 'https://example.invalid/r.git',
     PC_RECHECK_MS: '300',
   });
@@ -643,10 +644,13 @@ try {
   ok('a wake with no session is refused', res.status === 401);
   res = await post({ action: 'wake' }, 'stranger-token');
   ok('so is someone else\'s', res.status === 401);
+  has('and the refusal says why', (await res.json()).refused, 'OWNER_ID is u1');
   res = await post({ action: 'wake' }, 'owner-token');
   const body = await res.json();
-  ok('yours is let in', res.status === 200 && body.configured === true, JSON.stringify(body));
+  ok('yours is let in, even with a line break on every setting', res.status === 200 && body.configured === true, JSON.stringify(body));
   ok('and with nothing waiting starts nothing', !body.started.length && !body.chat);
+  res = await post({ action: 'dispatch' }, 'shh');
+  ok('the secret works despite its line break', res.status === 200);
   res = await post({ action: 'done', sandbox: 'cr-job-x' }, 'wrong');
   ok('a sandbox without the secret is refused', res.status === 401);
 

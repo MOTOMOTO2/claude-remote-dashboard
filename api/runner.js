@@ -22,7 +22,11 @@ import { dispatch } from '../host/dispatch.mjs';
 import { makeSandboxes } from '../host/sandboxes.mjs';
 import { makeGitHub } from '../host/git.mjs';
 
-const env = process.env;
+// Every setting trimmed: a value pasted or piped in with a line break on the
+// end looks set, and then quietly fails every comparison it is used in.
+const env = new Proxy(process.env, {
+  get: (all, key) => (typeof all[key] === 'string' ? all[key].trim() : all[key]),
+});
 
 /**
  * What talks to Vercel. The tests swap in a stand-in here: run from inside a
@@ -68,16 +72,46 @@ async function api(path, { method = 'GET', body, prefer } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-/** The dashboard's session token, checked with Supabase, and it has to be you. */
-async function signedInAsOwner(token) {
-  if (!token) return false;
+const short = (id) => String(id ?? '').slice(0, 8) || '(none)';
+
+/**
+ * The dashboard's session token, checked with Supabase, and it has to be
+ * you. Says why not, for the logs: a refusal is otherwise invisible.
+ */
+async function whoIsAsking(token) {
+  if (!token) return { ok: false, why: 'no session token was sent' };
   const url = env.SUPABASE_URL.replace(/\/+$/, '');
-  const res = await fetch(`${url}/auth/v1/user`, {
-    headers: { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${token}` },
-  }).catch(() => null);
-  if (!res?.ok) return false;
+  let res;
+  try {
+    res = await fetch(`${url}/auth/v1/user`, {
+      headers: { apikey: env.SUPABASE_SERVICE_KEY, authorization: `Bearer ${token}` },
+    });
+  } catch (e) {
+    return { ok: false, why: `could not reach Supabase auth: ${e.message}` };
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    return { ok: false, why: `Supabase auth said ${res.status}: ${text.slice(0, 160)}` };
+  }
   const user = await res.json().catch(() => null);
-  return Boolean(user?.id) && user.id === env.OWNER_ID;
+  if (!user?.id) return { ok: false, why: 'Supabase auth returned no user' };
+  if (user.id !== env.OWNER_ID) {
+    return { ok: false, why: `signed in as ${short(user.id)}…, but OWNER_ID is ${short(env.OWNER_ID)}…` };
+  }
+  return { ok: true };
+}
+
+/** One line per decision, so "nothing happened" always has a reason in the logs. */
+function report(action, did) {
+  const bits = [
+    did.started?.length ? `started ${did.started.map((s) => `${s.id}→${s.slug}`).join(', ')}` : '',
+    did.resumed?.length ? `resumed ${did.resumed.join(', ')}` : '',
+    did.recovered?.length ? `recovered ${did.recovered.join(', ')}` : '',
+    did.chat ? 'started the Ask sandbox' : '',
+    did.pc ? `PC awake (${did.pc})` : '',
+    did.skipped?.length ? `left ${did.skipped.map((s) => `${s.id} (${s.why})`).join(', ')}` : '',
+  ].filter(Boolean);
+  console.log(`[runner] ${action}: ${bits.join('; ') || 'nothing waiting'}`);
 }
 
 function tools(request) {
@@ -114,6 +148,7 @@ function recheck(t, did) {
   if (!did?.leftForPc?.length) return;
   waitUntil(new Promise((resolve) => setTimeout(resolve, RECHECK_MS))
     .then(() => t.run())
+    .then((again) => report('recheck', again))
     .catch((e) => console.log('[dispatch] recheck', e.message)));
 }
 
@@ -123,7 +158,9 @@ export async function GET(request) {
   if (action === 'cron') {
     if (!env.CRON_SECRET || !same(bearer(request), env.CRON_SECRET)) return json({ ok: false }, 401);
     if (gaps.length) return json({ ok: false, configured: false });
-    return json({ ok: true, ...(await tools(request).run()) });
+    const did = await tools(request).run();
+    report('cron', did);
+    return json({ ok: true, ...did });
   }
   // Names only, never values: enough to tell you what is left to set.
   return json({ ok: gaps.length === 0, configured: gaps.length === 0, missing: gaps });
@@ -136,15 +173,23 @@ export async function POST(request) {
   if (gaps.length) return json({ ok: false, configured: false, missing: gaps });
 
   if (action === 'wake') {
-    if (!(await signedInAsOwner(bearer(request)))) return json({ ok: false, configured: true }, 401);
+    const who = await whoIsAsking(bearer(request));
+    if (!who.ok) {
+      console.log(`[runner] wake refused: ${who.why}`);
+      return json({ ok: false, configured: true, refused: who.why }, 401);
+    }
     const t = tools(request);
     const did = await t.run();
+    report('wake', did);
     recheck(t, did);
     return json({ ok: true, configured: true, ...did });
   }
 
   // Everything else comes from inside a sandbox.
-  if (!same(bearer(request), env.RUNNER_SECRET)) return json({ ok: false }, 401);
+  if (!same(bearer(request), env.RUNNER_SECRET)) {
+    console.log(`[runner] ${action} refused: wrong or missing RUNNER_SECRET`);
+    return json({ ok: false }, 401);
+  }
   const t = tools(request);
   const name = String(body.sandbox ?? '');
   if ((action === 'done' || action === 'continue') && name.startsWith('cr-')) {
@@ -153,6 +198,7 @@ export async function POST(request) {
   }
   if (action === 'done' || action === 'continue' || action === 'dispatch') {
     const did = await t.run();
+    report(`${action} from ${name || 'a sandbox'}`, did);
     recheck(t, did);
     return json({ ok: true, ...did });
   }

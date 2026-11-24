@@ -161,6 +161,10 @@ export function renderTopbar() {
 export function hostExplainer() {
   const feed = state.realtime === 'live' ? '' : ' · live updates reconnecting';
   if (state.hostFresh) return `${state.host.name} is online — jobs start right away.${feed}`;
+  if (state.cloudRefused) {
+    return `The cloud runner is set up but refused this account: ${state.cloudRefused}. `
+      + `Check OWNER_ID in the Vercel project's settings.${feed}`;
+  }
   if (state.cloud) {
     return 'The cloud runner sleeps when nothing is queued and starts within seconds of '
       + `anything you send — your PC can stay off.${feed}`;
@@ -796,10 +800,19 @@ export function slotsSentence() {
   return `${claim} ${f.used} in flight, ${plural(f.free, 'slot')} free.`;
 }
 
+/** Why the cloud runner, when it last looked, chose to leave this job. */
+const CLOUD_WHY = {
+  cap: ['over its cap', 'over its usage cap — starts when the window resets'],
+  'pc-only': ['PC only', 'only on your PC, not GitHub — starts when your PC is on'],
+  pc: ['left for PC', 'left for your desktop, which was awake'],
+};
+const cloudWhy = (job) => CLOUD_WHY[state.cloudWhy?.get(String(job.id))] ?? null;
+
 /** The same answer in the width of a table column. */
 function shortWait(job) {
   const w = fleetNow().waiting.find((x) => x.job.id === job.id);
   if (!w) return 'queued';
+  if (w.reason === 'wake' && cloudWhy(job)) return cloudWhy(job)[0];
   if (w.reason === 'project') return `behind ${w.job.project_slug}`;
   if (w.reason === 'slot') return w.ahead ? `${w.ahead} ahead` : 'for a slot';
   if (w.reason === 'host') return 'no desktop';
@@ -813,7 +826,9 @@ function waitLabel({ reason, job, label }) {
   if (reason === 'host') {
     return state.host ? 'your desktop is offline' : 'no desktop has checked in';
   }
+  if (reason === 'wake' && cloudWhy(job)) return cloudWhy(job)[1];
   if (reason === 'wake') return 'starting in the cloud — a few seconds';
+  if (reason === 'host' && state.cloudRefused) return `the cloud runner refused: ${state.cloudRefused}`;
   if (reason === 'next') return 'next up — claimed within seconds';
   return label;
 }

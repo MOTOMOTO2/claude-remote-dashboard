@@ -38,10 +38,10 @@ export function runnerEnv(env, extra = {}) {
     'ASSISTANT_NAME', 'HOST_NAME',
   ];
   const out = {};
-  for (const k of keep) if (env[k]) out[k] = String(env[k]);
+  for (const k of keep) if (env[k]) out[k] = String(env[k]).trim();
   return {
     ...out,
-    ...gitAuthEnv(env.GH_TOKEN),
+    ...gitAuthEnv(String(env.GH_TOKEN ?? '').trim()),
     GIT_TERMINAL_PROMPT: '0',
     DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',

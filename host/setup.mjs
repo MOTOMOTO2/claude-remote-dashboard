@@ -70,11 +70,12 @@ const later = [];
 
 async function store(name, value, { secret = true } = {}) {
   if (!value) return;
-  const res = vercel(['env', 'add', name, 'production', ...(secret ? ['--sensitive'] : [])], `${value}\n`);
+  // No line break after the value: piped in, it becomes part of it.
+  const res = vercel(['env', 'add', name, 'production', ...(secret ? ['--sensitive'] : [])], String(value).trim());
   if (res.status === 0) say(`  ${bold('✓')} ${name} saved`);
   else {
     // Older CLIs have no --sensitive; every Vercel variable is encrypted anyway.
-    const plain = vercel(['env', 'add', name, 'production'], `${value}\n`);
+    const plain = vercel(['env', 'add', name, 'production'], String(value).trim());
     say(plain.status === 0 ? `  ${bold('✓')} ${name} saved` : `  ✗ ${name}: ${(plain.stderr || res.stderr).trim().split('\n').at(-1)}`);
   }
 }
