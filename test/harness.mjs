@@ -161,6 +161,19 @@ export function makeWindow({ width = 1200, dark = false, html = file('index.html
   const { window } = dom;
   const screen = { width, dark };
 
+  // Count the frames the app has asked for and not yet been given, so `tick`
+  // can wait for a render that is still on its way instead of guessing how
+  // long a slow machine takes to draw one.
+  const raf = window.requestAnimationFrame.bind(window);
+  const caf = window.cancelAnimationFrame.bind(window);
+  waiting = new Set();
+  window.requestAnimationFrame = (cb) => {
+    const id = raf((t) => { waiting.delete(id); cb(t); });
+    waiting.add(id);
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => { waiting.delete(id); caf(id); };
+
   window.matchMedia = (query) => ({
     media: query,
     get matches() {
@@ -217,5 +230,18 @@ export function makeWindow({ width = 1200, dark = false, html = file('index.html
   return { dom, window, screen };
 }
 
-/** Long enough for a hashchange task, its microtasks, and the next frame. */
-export const tick = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+/** Animation frames the app has requested and not yet been given. */
+let waiting = new Set();
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Long enough for a hashchange task, its microtasks, and the next frame — and
+ * then for any frame still outstanding. A fixed sleep was the whole rule once,
+ * and on a slow machine a thread needs two renders (the route, then its log)
+ * and took longer than the sleep, so five checks failed on a healthy app.
+ */
+export async function tick(ms = 60) {
+  await sleep(ms);
+  for (let i = 0; i < 120 && waiting.size; i++) await sleep(16);
+}
