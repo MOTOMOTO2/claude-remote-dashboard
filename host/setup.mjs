@@ -64,8 +64,23 @@ if (listing.status !== 0) {
 }
 const have = new Set([...listing.stdout.matchAll(/^\s*([A-Z][A-Z0-9_]+)\s/gm)].map((m) => m[1]));
 
-// Settings named on the command line are asked again, and replaced.
+// Settings named on the command line are asked again, and replaced. A key
+// typed there instead of a name is refused: it would sit in the shell's
+// history for good. It is never printed back.
+const looksLikeKey = (a) => /^(sb_(secret|publishable)_|eyJ|sk-ant-|gh[pousr]_|github_pat_)/.test(a) || a.length > 40;
+const pasted = process.argv.slice(2).filter(looksLikeKey);
+if (pasted.length) {
+  say('  That looks like a key itself, not the name of a setting.');
+  say(`  Run ${bold('npm run cloud:setup -- SUPABASE_SERVICE_KEY')} and paste the key when it asks —`);
+  say('  and since it is now in your terminal history, make a new one and delete that one.\n');
+  process.exit(1);
+}
 const redo = new Set(process.argv.slice(2).map((a) => a.toUpperCase()));
+const known = new Set(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'OWNER_ID', 'CLAUDE_CODE_OAUTH_TOKEN',
+  'GH_TOKEN', 'GITHUB_OWNER', 'OWNER_NAME', 'RUNNER_SECRET', 'CRON_SECRET']);
+for (const name of redo) {
+  if (!known.has(name)) say(`  ${name} is not one of the settings (${[...known].join(', ')}).`);
+}
 for (const name of redo) {
   if (!have.has(name)) continue;
   const gone = vercel(['env', 'rm', name, 'production', '--yes']);
