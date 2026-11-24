@@ -148,24 +148,51 @@ await want('SUPABASE_SERVICE_KEY', async () => {
   }
 });
 
+/** A user of this Supabase project, by id: their email, or null if there is none. */
+async function userOf(key, id) {
+  const res = await fetch(`${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(id)}`, {
+    headers: { apikey: key, authorization: `Bearer ${key}` },
+  }).catch(() => null);
+  return res?.ok ? ((await res.json()).email ?? '(no email)') : null;
+}
+
 await want('OWNER_ID', async () => {
-  // Whose dashboard this is: the only account the runner will work for.
-  const key = values.SUPABASE_SERVICE_KEY;
+  // Whose dashboard this is: the only account the runner will work for. It
+  // is looked up rather than typed: a mistyped id refuses every wake.
+  let key = values.SUPABASE_SERVICE_KEY;
+  if (!key) {
+    say('  To look it up, paste your Supabase secret key (sb_secret_…) once more.');
+    say('  It is only used for the lookup here, not saved again.');
+    key = await askHidden('  Paste it (hidden), or press Enter to type the id yourself: ');
+  }
   if (key && supabaseUrl) {
-    const res = await fetch(`${supabaseUrl}/rest/v1/jobs?select=owner&limit=1`, {
+    const res = await fetch(`${supabaseUrl}/rest/v1/jobs?select=owner&order=created_at.desc&limit=50`, {
       headers: { apikey: key, authorization: `Bearer ${key}` },
     }).catch(() => null);
-    const owner = res?.ok ? (await res.json())[0]?.owner : null;
-    if (owner) {
-      say(`  Your jobs belong to ${owner}.`);
+    if (!res?.ok) say(`  Supabase would not answer with that key (${res?.status ?? 'no answer'}).`);
+    const owners = res?.ok ? [...new Set((await res.json()).map((r) => r.owner).filter(Boolean))] : [];
+    for (const owner of owners) {
+      const email = await userOf(key, owner);
+      if (!email) continue;
+      say(`  Your jobs belong to ${bold(email)} (${owner}).`);
       if (await yes('  That is you — use it?')) return owner;
     }
+    if (res?.ok && !owners.length) say('  There are no jobs yet to read it from.');
   }
-  say(`  Your user id, from https://supabase.com/dashboard/project/${ref || '<project>'}/auth/users`);
+  say(`  Your user id is the UID next to your email at https://supabase.com/dashboard/project/${ref || '<project>'}/auth/users`);
   for (;;) {
     const id = await ask('  OWNER_ID: ');
-    if (!id || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return id;
-    say('  That is not a user id — it looks like 1b2c3d4e-0000-0000-0000-000000000000.');
+    if (!id) return '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      say('  That is not a user id — it looks like 1b2c3d4e-0000-0000-0000-000000000000.');
+      continue;
+    }
+    if (key) {
+      const email = await userOf(key, id);
+      if (!email) { say('  There is no user with that id in this Supabase project.'); continue; }
+      say(`  That is ${bold(email)}.`);
+    }
+    return id;
   }
 });
 
