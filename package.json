@@ -25,6 +25,6 @@
   },
   "dependencies": {
     "@vercel/functions": "^3.11.3",
-    "@vercel/sandbox": "^4.1.0"
+    "@vercel/sandbox": "4.0.0"
   }
 }
