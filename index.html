@@ -83,28 +83,28 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
         New project
       </button>
-      <div class="nav-row">
-        <a id="ask-link" class="btn ghost" href="#/ask">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
-          Ask<span id="ask-count" class="count"></span>
-        </a>
-        <a id="agents-link" class="btn ghost" href="#/agents">
+      <nav class="nav" aria-label="Sections">
+        <a id="agents-link" class="nav-item" href="#/agents">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bot"/></svg>
-          Agents<span id="agents-count" class="count"></span>
+          <span class="nav-name">Agents</span><span id="agents-count" class="count"></span>
         </a>
-        <a id="house-link" class="btn ghost" href="#/house">
+        <a id="ask-link" class="nav-item" href="#/ask">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
+          <span class="nav-name">Ask</span><span id="ask-count" class="count"></span>
+        </a>
+        <a id="house-link" class="nav-item" href="#/house">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-house"/></svg>
-          House<span id="house-count" class="count"></span>
+          <span class="nav-name">House</span><span id="house-count" class="count"></span>
         </a>
-        <a id="projects-link" class="btn ghost" href="#/projects">
+        <a id="projects-link" class="nav-item" href="#/projects">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
-          Projects<span id="projects-count" class="count"></span>
+          <span class="nav-name">Projects</span><span id="projects-count" class="count"></span>
         </a>
-        <a id="ideas-link" class="btn ghost" href="#/ideas">
+        <a id="ideas-link" class="nav-item" href="#/ideas">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
-          Ideas<span id="ideas-count" class="count"></span>
+          <span class="nav-name">Ideas</span><span id="ideas-count" class="count"></span>
         </a>
-      </div>
+      </nav>
       <div class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"/></svg>
         <input id="project-search" type="search" placeholder="Search projects"
@@ -153,9 +153,15 @@
         <span id="view-sub" class="tb-sub"></span>
       </div>
 
-      <button id="usage-pill" class="pill" type="button" hidden
-              aria-label="Usage limits">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gauge"/></svg>
+      <!-- Your limits, at a glance: a ring for how much is used, and how long
+           until it resets. Tapping it opens every window in a sheet. -->
+      <button id="usage-pill" class="pill usage-chip" type="button" hidden
+              aria-label="Usage limits" aria-haspopup="dialog" aria-controls="usage-sheet">
+        <svg class="ring" viewBox="0 0 24 24" aria-hidden="true">
+          <circle class="ring-track" cx="12" cy="12" r="9"/>
+          <circle id="usage-ring" class="ring-fill" cx="12" cy="12" r="9" pathLength="100"
+                  stroke-dasharray="0 100"/>
+        </svg>
         <span id="usage-pill-text">—</span>
       </button>
 
@@ -166,141 +172,6 @@
 
     <div class="stage">
     <div id="scroller" class="scroller">
-
-      <!-- ── home ──────────────────────────────────────────── -->
-      <section id="home-view" class="view" hidden>
-        <div id="hero-card" class="hero-card">
-          <p id="hero-eyebrow" class="hero-eyebrow">Right now</p>
-          <p id="hero-value" class="hero-figure">0</p>
-          <p id="hero-label" class="hero-label">agents running</p>
-          <div id="hero-chips" class="chip-row"></div>
-          <p id="hero-now" class="hero-now" hidden></p>
-        </div>
-
-        <section id="active-block" class="block" hidden>
-          <h2 class="block-h">
-            <span>Live now</span><span id="active-count" class="count"></span>
-            <span id="active-note" class="block-note"></span>
-          </h2>
-          <div id="active-list" class="stack"></div>
-          <a class="block-more" id="active-more" href="#/agents" hidden>
-            <span id="active-more-text">All agents</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arrow"/></svg>
-          </a>
-        </section>
-
-        <section id="ask-block" class="block">
-          <h2 class="block-h">
-            <span>Your assistant</span>
-            <span id="ask-block-note" class="block-note"></span>
-          </h2>
-          <a id="ask-card" class="card info-card" href="#/ask"></a>
-          <div id="ask-quick" class="chip-row"></div>
-        </section>
-
-        <section id="house-block" class="block" hidden>
-          <h2 class="block-h">
-            <span>Your house</span>
-            <span id="house-block-note" class="block-note"></span>
-          </h2>
-          <a id="house-card" class="card info-card" href="#/house"></a>
-          <div id="house-home-quick" class="chip-row"></div>
-        </section>
-
-        <section id="usage-block" class="block">
-          <h2 class="block-h">
-            <span>Limits</span>
-            <span id="usage-note" class="block-note"></span>
-          </h2>
-          <div id="usage-home" class="usage card"></div>
-          <p id="usage-empty" class="empty-note" hidden>
-            No readings yet — your desktop reports these when it starts up.
-          </p>
-          <div class="usage-bar">
-            <span id="usage-foot"></span>
-            <button id="usage-refresh" class="btn tiny ghost" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry"/></svg>
-              Refresh
-            </button>
-          </div>
-        </section>
-
-        <section id="suggest-block" class="block" hidden>
-          <h2 class="block-h">
-            <span>What next</span>
-            <span id="suggest-note" class="block-note"></span>
-          </h2>
-          <div id="suggest-list" class="suggest-list"></div>
-          <a class="block-more" href="#/ideas">
-            <span id="ideas-teaser">All ideas</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arrow"/></svg>
-          </a>
-        </section>
-
-        <section id="glance-block" class="block">
-          <h2 class="block-h"><span>At a glance</span></h2>
-          <div class="tile-row">
-            <div class="tile">
-              <p class="tile-label">Projects</p>
-              <p id="kpi-projects" class="tile-value">—</p>
-              <p id="kpi-projects-note" class="tile-note"></p>
-            </div>
-            <div class="tile">
-              <p class="tile-label">Finished</p>
-              <p id="kpi-done" class="tile-value">—</p>
-              <p id="kpi-done-note" class="tile-note"></p>
-            </div>
-            <div class="tile">
-              <p class="tile-label">Needs a look</p>
-              <p id="kpi-failed" class="tile-value">—</p>
-              <p id="kpi-failed-note" class="tile-note"></p>
-            </div>
-            <div class="tile">
-              <p class="tile-label">First-try rate</p>
-              <p id="kpi-rate" class="tile-value">—</p>
-              <p id="kpi-rate-note" class="tile-note"></p>
-            </div>
-          </div>
-        </section>
-
-        <button id="home-more-toggle" class="btn ghost block only-narrow" type="button"
-                aria-expanded="false" aria-controls="home-more" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-down"/></svg>
-          <span id="home-more-label">More detail</span>
-        </button>
-
-        <div id="home-more" class="home-more">
-        <section id="activity-block" class="block" hidden>
-          <h2 class="block-h">
-            <span>Last 14 days</span>
-            <span id="activity-note" class="block-note"></span>
-          </h2>
-          <div id="activity" class="card chart"></div>
-        </section>
-
-        <section id="recent-block" class="block" hidden>
-          <h2 class="block-h"><span>Recently finished</span></h2>
-          <div id="recent-list" class="stack"></div>
-        </section>
-
-        <section id="desktop-block" class="block">
-          <h2 class="block-h"><span>Your desktop</span></h2>
-          <div id="desktop-card" class="card info-card"></div>
-        </section>
-        </div>
-
-        <div id="home-empty" class="empty" hidden>
-          <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark"/></svg>
-          <h3>Nothing here yet</h3>
-          <p>Start a project and your desktop picks it up — it creates the repo,
-             writes the code, and pushes it.</p>
-        </div>
-
-        <button id="home-new" class="btn primary block tall">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
-          New project
-        </button>
-      </section>
 
       <!-- ── project chat ──────────────────────────────────── -->
       <section id="chat-view" class="view" hidden>
@@ -351,41 +222,53 @@
         </div>
       </section>
 
-      <!-- ── agents: every run at once ──────────────────────── -->
+      <!-- ── agents: the front page — what is running, what it costs, what is left ── -->
       <section id="agents-view" class="view" hidden>
         <div id="fleet-hero" class="hero-card">
-          <p class="hero-eyebrow">Right now</p>
-          <p id="fleet-value" class="hero-figure">0</p>
-          <p id="fleet-label" class="hero-label">agents running</p>
-          <div id="fleet-pips" class="pips" role="img" aria-label="No agents running"></div>
+          <div class="hero-main">
+            <p id="fleet-value" class="hero-figure">0</p>
+            <div class="hero-text">
+              <p id="fleet-label" class="hero-label">agents running</p>
+              <div id="fleet-pips" class="pips" role="img" aria-label="No agents running"></div>
+            </div>
+          </div>
           <div id="fleet-chips" class="chip-row"></div>
         </div>
 
-        <section id="slots-block" class="block">
+        <section id="usage-block" class="block">
           <h2 class="block-h">
-            <span>How many at once</span>
-            <span id="slots-note" class="block-note"></span>
+            <span>Usage limits</span>
+            <span id="usage-note" class="block-note"></span>
           </h2>
-          <div class="card slots-card">
-            <div id="slots" class="segmented" role="radiogroup"
-                 aria-label="How many agents may run at once">
-              <label><input type="radio" name="slots" value="1"><span>1</span></label>
-              <label><input type="radio" name="slots" value="2"><span>2</span></label>
-              <label><input type="radio" name="slots" value="3" checked><span>3</span></label>
-              <label><input type="radio" name="slots" value="4"><span>4</span></label>
-              <label><input type="radio" name="slots" value="5"><span>5</span></label>
-              <label><input type="radio" name="slots" value="6"><span>6</span></label>
-            </div>
-            <p id="slots-hint" class="opt-note"></p>
+          <div id="usage-agents" class="usage card"></div>
+          <p id="usage-empty" class="empty-note" hidden>
+            No readings yet — your desktop reports these when it starts up.
+          </p>
+          <div class="usage-bar">
+            <span id="usage-foot"></span>
+            <button id="usage-refresh" class="btn tiny ghost" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry"/></svg>
+              Refresh
+            </button>
           </div>
         </section>
 
         <section id="fleet-block" class="block">
-          <h2 class="block-h"><span>In flight</span><span id="fleet-count" class="count"></span></h2>
+          <h2 class="block-h">
+            <span>In flight</span><span id="fleet-count" class="count"></span>
+            <button id="stop-all" class="btn tiny ghost" type="button" data-stop-all hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-stop"/></svg>
+              Stop all
+            </button>
+          </h2>
           <div id="fleet-list" class="fleet"></div>
-          <p id="fleet-empty" class="empty-note" hidden>
-            Nothing is being worked on. Start an agent and it shows up here, live.
-          </p>
+          <div id="fleet-empty" class="quiet" hidden>
+            <p>Nothing is being worked on.</p>
+            <a class="btn tiny primary" href="#/new">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+              Start something
+            </a>
+          </div>
         </section>
 
         <section id="waiting-block" class="block" hidden>
@@ -404,20 +287,31 @@
           <div id="fleet-done" class="stack"></div>
         </section>
 
-        <div class="fleet-foot">
-          <a class="btn primary" href="#/new">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
-            New agent
-          </a>
-          <button id="stop-all" class="btn ghost" type="button" data-stop-all hidden>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-stop"/></svg>
-            Stop all
-          </button>
-        </div>
+        <section id="slots-block" class="block">
+          <h2 class="block-h">
+            <span>How many at once</span>
+            <span id="slots-note" class="block-note"></span>
+          </h2>
+          <div class="card slots-card">
+            <div id="slots" class="segmented" role="radiogroup"
+                 aria-label="How many agents may run at once">
+              <label><input type="radio" name="slots" value="1"><span>1</span></label>
+              <label><input type="radio" name="slots" value="2"><span>2</span></label>
+              <label><input type="radio" name="slots" value="3" checked><span>3</span></label>
+              <label><input type="radio" name="slots" value="4"><span>4</span></label>
+              <label><input type="radio" name="slots" value="5"><span>5</span></label>
+              <label><input type="radio" name="slots" value="6"><span>6</span></label>
+            </div>
+            <p id="slots-hint" class="opt-note"></p>
+            <p class="opt-note">One agent per project, so two never share a folder. A paused
+               agent keeps its slot.</p>
+          </div>
+        </section>
 
-        <p class="empty-note center">Your desktop claims as many queued jobs as this
-           ceiling allows — one agent per project, so two never share a folder. A
-           paused agent keeps its slot.</p>
+        <section id="desktop-block" class="block">
+          <h2 class="block-h"><span>Runner</span></h2>
+          <div id="desktop-card" class="card info-card"></div>
+        </section>
       </section>
 
       <!-- ── house ─────────────────────────────────────────── -->
@@ -563,11 +457,14 @@
           </h2>
           <div id="suggest-new" class="suggest-list"></div>
           <a class="block-more" href="#/ideas">
-            <span>More ideas, read off your own work</span>
+            <span id="ideas-teaser">More ideas, read off your own work</span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arrow"/></svg>
           </a>
         </div>
-        <div id="usage-new" class="usage card" hidden></div>
+        <section id="usage-new-block" class="block" hidden>
+          <h2 class="block-h"><span>Usage limits</span></h2>
+          <div id="usage-new" class="usage card"></div>
+        </section>
       </section>
     </div>
 
@@ -638,36 +535,28 @@
 
     <!-- ── bottom tabs: the nav on a phone, where a drawer is a detour -->
     <nav id="tabbar" class="tabbar only-narrow" aria-label="Sections">
-      <a id="tab-home" class="tab" href="#/">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-home"/></svg>
-        <span>Home</span>
-      </a>
-      <a id="tab-ask" class="tab" href="#/ask">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg>
-        <span>Ask</span>
-        <i id="tab-ask-count" class="tab-count" hidden></i>
-      </a>
       <a id="tab-agents" class="tab" href="#/agents">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bot"/></svg>
-        <span>Agents</span>
+        <span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bot"/></svg></span>
+        <span class="tab-name">Agents</span>
         <i id="tab-agents-count" class="tab-count" hidden></i>
       </a>
-      <a id="tab-house" class="tab" href="#/house">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-house"/></svg>
-        <span>House</span>
-        <i id="tab-house-count" class="tab-count" hidden></i>
+      <a id="tab-ask" class="tab" href="#/ask">
+        <span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-brain"/></svg></span>
+        <span class="tab-name">Ask</span>
+        <i id="tab-ask-count" class="tab-count" hidden></i>
       </a>
       <a id="tab-new" class="tab tab-new" href="#/new">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
-        <span>New</span>
+        <span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg></span>
+        <span class="tab-name">New</span>
+      </a>
+      <a id="tab-house" class="tab" href="#/house">
+        <span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-house"/></svg></span>
+        <span class="tab-name">House</span>
+        <i id="tab-house-count" class="tab-count" hidden></i>
       </a>
       <a id="tab-projects" class="tab" href="#/projects">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
-        <span>Projects</span>
-      </a>
-      <a id="tab-ideas" class="tab" href="#/ideas">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
-        <span>Ideas</span>
+        <span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg></span>
+        <span class="tab-name">Projects</span>
       </a>
     </nav>
   </div>
@@ -690,12 +579,33 @@
   </div>
 </dialog>
 
+<!-- Every limit, with when it resets and how long is left. Opened from the
+     chip in the topbar, so it is one tap from wherever you are. -->
+<dialog id="usage-sheet" class="dialog sheet" aria-labelledby="usage-sheet-title">
+  <div class="sheet-body">
+    <header class="sheet-head">
+      <h3 id="usage-sheet-title">Usage limits</h3>
+      <button id="usage-sheet-close" class="icon-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <p id="usage-sheet-lead" class="sheet-lead"></p>
+    <div id="usage-sheet-list" class="usage"></div>
+    <div class="usage-bar">
+      <span id="usage-sheet-foot"></span>
+      <button id="usage-sheet-refresh" class="btn tiny ghost" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry"/></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+</dialog>
+
 <!-- ───────────────────────────────────────────────── icon sprite -->
 <svg class="sprite" aria-hidden="true" focusable="false">
   <defs>
     <!-- Brand mark: an eight-ray spark. Mirrored in favicon.svg. -->
     <g id="i-spark"><path d="M12 2.6v18.8M3.6 12h16.8M6.1 6.1l11.8 11.8M17.9 6.1L6.1 17.9"/></g>
-    <g id="i-home"><path d="M4 10.5L12 4l8 6.5V19a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 014 19z"/><path d="M9.5 20.5v-6h5v6"/></g>
     <g id="i-menu"><path d="M4 7h16M4 12h16M4 17h16"/></g>
     <g id="i-close"><path d="M6 6l12 12M18 6L6 18"/></g>
     <g id="i-plus"><path d="M12 5v14M5 12h14"/></g>

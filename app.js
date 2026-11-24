@@ -7,6 +7,7 @@ import * as views from './views.js';
 import {
   initTheme, initNotify, notify, startTicker, toast, ask, copy,
   openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
+  openSheet, closeSheet, initSheet, sheetOpen,
 } from './ui.js';
 import { route, initRouter, syncRoute, go, projectHref, askHref } from './router.js';
 import { STARTERS } from './assistant.js';
@@ -83,7 +84,6 @@ function draw() {
 
   // The pending view borrows the chat column so the message you just sent
   // stays on screen while the host names the project.
-  $('home-view').hidden = v !== 'home';
   $('chat-view').hidden = !(v === 'project' || v === 'pending');
   $('new-view').hidden = v !== 'new';
   $('ideas-view').hidden = v !== 'ideas';
@@ -116,16 +116,15 @@ function draw() {
   views.renderAskBadge();
   views.renderHouseBadge();
   views.renderTabs();
-  // Only two views show them, and they read the whole account to work it out.
-  if (v === 'home' || v === 'new') views.renderSuggestions();
-  if (v === 'new') views.renderNewIntro();
+  // Only the new-project view shows them, and they read the whole account to
+  // work it out.
+  if (v === 'new') { views.renderSuggestions(); views.renderNewIntro(); }
   if (v === 'ideas') views.renderIdeas();
   if (v === 'projects') views.renderProjects();
   if (v === 'agents') views.renderAgents();
   if (v === 'house') views.renderHouse();
   if (v === 'ask') views.renderAsk();
 
-  if (v === 'home') { views.renderHome(); views.renderAskHome(); views.renderHouseHome(); }
   if (v === 'project') views.renderChat();
   if (v === 'pending') {
     const job = store.state.jobs.get(route.jobId);
@@ -178,7 +177,7 @@ $('jump').addEventListener('click', () => { stick = true; scrollToEnd(); updateJ
 
 function onRoute() {
   closeDrawer();
-  stick = route.view !== 'home';
+  stick = true;
   scroller().scrollTop = 0;
   if (route.view === 'project') store.loadThreadEvents(route.slug);
   render();
@@ -196,7 +195,6 @@ $('projects-link').addEventListener('click', closeDrawer);
 $('agents-link').addEventListener('click', closeDrawer);
 $('house-link').addEventListener('click', closeDrawer);
 $('ask-link').addEventListener('click', closeDrawer);
-$('home-new').addEventListener('click', () => { go('#/new'); focusPrompt(); });
 
 $('project-search').addEventListener('input', (e) => {
   views.setFilter(e.target.value);
@@ -229,20 +227,30 @@ $('ask-new').addEventListener('click', async () => {
   go(askHref(data?.id));
   focusPrompt();
 });
-// Both usage affordances re-read before they answer, so tapping one is also
-// the way to force a refresh.
+// The chip opens every window in a sheet — a toast was gone before you had
+// finished reading when a reset is a day and a time. Opening it re-reads, so
+// what it shows is not older than the tap, and it is also how you force one.
 $('usage-pill').addEventListener('click', () => {
-  toast(views.usageSentence(), { glyph: 'gauge', ms: 5000 });
+  openSheet('usage-sheet');
   store.pollUsage();
 });
-$('usage-refresh').addEventListener('click', async () => {
-  const btn = $('usage-refresh');
+$('usage-sheet-close').addEventListener('click', () => closeSheet('usage-sheet'));
+initSheet('usage-sheet');
+
+// Refreshing from the front page says what it found in a toast; from the
+// sheet it just updates the line under the meters, because a modal sits over
+// the toasts and a toast you cannot see is no answer.
+async function refreshUsage(btn, { toasts }) {
   btn.disabled = true;
   await store.pollUsage();
   btn.disabled = false;
+  if (!toasts) return;
   toast(store.state.usageError ? store.state.usageError : views.usageSentence(),
     { glyph: 'gauge', bad: Boolean(store.state.usageError), ms: 4000 });
-});
+}
+$('usage-refresh').addEventListener('click', () => refreshUsage($('usage-refresh'), { toasts: true }));
+$('usage-sheet-refresh').addEventListener('click',
+  () => refreshUsage($('usage-sheet-refresh'), { toasts: false }));
 
 // How many agents may run at once. The pips move immediately; the row the
 // runner reads follows, and the toast says which of those happened.
@@ -255,13 +263,6 @@ $('slots').addEventListener('change', async (e) => {
   } else {
     toast(`Up to ${n} agent${n === 1 ? '' : 's'} at once`, { glyph: 'bot' });
   }
-});
-
-// Home's reference blocks: one tap, on a phone only.
-$('home-more-toggle').addEventListener('click', () => {
-  views.toggleHomeMore();
-  views.renderHome();
-  $('home-more').scrollIntoView?.({ block: 'nearest' });
 });
 
 $('sign-out').addEventListener('click', async () => {
@@ -311,8 +312,8 @@ function updateHint() {
   $('send-hint').textContent = isNarrow() ? '' : 'Enter to send';
 }
 
-// Several layouts are decided in JS rather than CSS — home's fold, the meter
-// fold, how many log lines a card shows — so a resize has to redraw.
+// A layout or two is decided in JS rather than CSS — how many log lines a card
+// shows — so a resize has to redraw.
 window.addEventListener('resize', () => { updateHint(); updateJump(); scheduleRender(); });
 
 $('composer').addEventListener('submit', async (e) => {
@@ -696,6 +697,7 @@ document.addEventListener('keydown', (e) => {
   trapFocus(e);
 
   if (e.key === 'Escape') {
+    if (sheetOpen('usage-sheet')) { closeSheet('usage-sheet'); return; }
     if (drawerOpen()) { closeDrawer(); return; }
     if (!$('opts').hidden) {
       $('opts').hidden = true;

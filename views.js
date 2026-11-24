@@ -3,8 +3,9 @@
 
 import {
   $, esc, ago, since, elapsed, dayClock, until, when, stamp, plural, clip,
-  firstLine, dayKey, weekday, signedOut, SIGNED_OUT_FIX,
+  firstLine, signedOut, SIGNED_OUT_FIX,
 } from './util.js';
+import { readings, tightest, chip, sentence, resetWords, spanWords } from './usage.js';
 import { md } from './md.js';
 import { icon, setBadge, isNarrow } from './ui.js';
 import { route, projectHref, askHref } from './router.js';
@@ -50,9 +51,6 @@ function timing(job) {
     // A resume can land tomorrow, so it has to name the day, not just a clock.
     return job.resume_at ? `resumes ${dayClock(job.resume_at)}` : 'waiting';
   }
-  // With more than one agent allowed, "queued" has several meanings and
-  // only one of them is "your desktop hasn't looked yet".
-  if (job.status === 'queued') return esc(shortWait(job));
   if (job.status === 'running') {
     const from = job.claimed_at ?? job.created_at;
     return `<span data-elapsed="${esc(from)}">${elapsed(from)}</span>`;
@@ -91,7 +89,6 @@ const jobRow = (job) => `
 export function renderTopbar() {
   const who = askPresence();
   const titles = {
-    home: 'claude‑remote',
     project: route.slug ?? '',
     pending: 'Starting…',
     new: 'New project',
@@ -104,11 +101,7 @@ export function renderTopbar() {
   $('view-title').textContent = titles[route.view] ?? '';
 
   let sub = '';
-  if (route.view === 'home') {
-    const count = state.projects.length
-      || new Set(jobList().map((j) => j.project_slug).filter(Boolean)).size;
-    sub = count ? plural(count, 'project') : '';
-  } else if (route.view === 'project') {
+  if (route.view === 'project') {
     const p = projectOf(route.slug);
     const n = threadOf(route.slug).length;
     sub = [
@@ -246,111 +239,68 @@ export function renderSidebar() {
 }
 
 // ── usage meters ──────────────────────────────────────────────────────
+// What a reading means lives in usage.js, because it is the part that has to
+// be right: this file only draws it. A meter always says two things under its
+// bar — when the window resets, and how long that is — because those are the
+// two things you look at it to find out.
 
-const WINDOW_LABEL = {
-  five_hour: 'Session · 5 hours',
-  seven_day: 'Week · all models',
-  seven_day_opus: 'Week · Opus',
-  seven_day_sonnet: 'Week · Sonnet',
-  seven_day_overage_included: 'Week · incl. overage',
-  overage: 'Overage',
-};
-const WINDOW_SHORT = {
-  five_hour: '5h', seven_day: 'week', seven_day_opus: 'week · Opus',
-  seven_day_sonnet: 'week · Sonnet', seven_day_overage_included: 'week+',
-  overage: 'overage',
-};
-const WINDOW_ORDER = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
+const usageList = () => readings(state.usage);
 
-/** The severity of a ratio, as a class and the word that always rides with it. */
-const level = (pct) => (pct >= 85
-  ? { tone: 'full', word: 'nearly out' }
-  : pct >= 60 ? { tone: 'warn', word: 'watch' } : { tone: '', word: 'healthy' });
-
-const usageRows = () => state.usage
-  .filter((r) => r.pct != null)
-  .sort((a, b) => {
-    const ai = WINDOW_ORDER.indexOf(a.window_type);
-    const bi = WINDOW_ORDER.indexOf(b.window_type);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-  });
-
-/** The window with the least headroom — the one that will actually stop you. */
-const tightest = () => usageRows().reduce(
-  (worst, r) => (worst && Number(worst.pct) >= Number(r.pct) ? worst : r), null);
-
-const future = (iso) => Boolean(iso) && new Date(iso) > new Date();
-
-/**
- * When a window resets, in words: the day comes first because "resets 3:00 PM"
- * on a weekly limit is the one thing you cannot act on. The countdown ticks.
- */
+/** The rest of the line under a bar: when it resets, or why it cannot say. */
 function resetHtml(r) {
-  if (!future(r.resets_at)) return '<span class="meter-reset muted">reset time unknown</span>';
-  return `<span class="meter-reset">
-    ${icon('calendar')}resets <b>${esc(dayClock(r.resets_at))}</b>
-    <span class="dim">· in <span data-until="${esc(r.resets_at)}">${esc(until(r.resets_at))}</span></span>
-  </span>`;
+  const w = resetWords(r);
+  if (r.state === 'live') {
+    return `<span class="meter-reset">Resets <b>${esc(w.clock)}</b>
+      <span class="sep">·</span>
+      <span class="in" data-until-phrase="${esc(r.resetISO)}">${esc(w.phrase)}</span></span>`;
+  }
+  if (r.state === 'idle') {
+    // Not unknown: Anthropic opens a window with your next message, so there
+    // is no clock running yet. The useful answer is how long you will have.
+    return `<span class="meter-reset">Starts with your next message${
+      r.span ? ` <span class="sep">·</span> lasts ${esc(spanWords(r.span))}` : ''}</span>`;
+  }
+  if (r.state === 'stale') {
+    return `<span class="meter-reset">Reset <b>${esc(w.clock)}</b>
+      <span class="sep">·</span> ${esc(w.ago)} — waiting for a new reading</span>`;
+  }
+  return '<span class="meter-reset">Reset time not reported</span>';
 }
 
 /**
  * A ratio against a limit is a meter, not a chart. The fill carries severity
  * and the track is a lighter step of the same ramp, so the state reads across
- * the whole bar — and the percentage is always written out beside it.
+ * the whole bar — and the percentage is always written out beside it, with a
+ * word for the severity, so the colour is never the only thing saying it.
  */
 function meterHtml(r) {
-  const pct = Math.max(0, Number(r.pct));
-  const { tone, word } = level(pct);
-  const left = Math.max(0, 100 - Math.round(pct));
+  const pct = Math.round(r.pct);
   return `
-      <div class="meter ${tone}">
+      <div class="meter ${r.tone}" data-window="${esc(r.type)}" data-state="${esc(r.state)}">
         <div class="meter-head">
-          <span class="meter-name">${esc(WINDOW_LABEL[r.window_type] ?? r.window_type)}</span>
-          <span class="meter-state"><i class="dot"></i>${esc(word)}</span>
-          <span class="meter-pct">${pct.toFixed(0)}%</span>
+          <span class="meter-name">${esc(r.label)}</span>
+          <span class="meter-state"><i class="dot"></i>${esc(r.word)}</span>
+          <span class="meter-pct">${r.state === 'stale'
+            ? `was <b>${pct}%</b>` : `<b>${pct}%</b> used`}</span>
         </div>
         <div class="meter-track">
-          <i class="meter-fill" style="width:${Math.min(100, pct)}%"></i>
+          <i class="meter-fill" style="width:${r.fill}%"></i>
         </div>
         <div class="meter-foot">
-          <span class="meter-left">${left}% left</span>
           ${resetHtml(r)}
+          ${r.left == null ? '' : `<span class="meter-left">${r.left}% left</span>`}
         </div>
       </div>`;
 }
 
-const usageHtml = () => usageRows().map(meterHtml).join('');
+const usageHtml = () => usageList().map(meterHtml).join('');
 
-/**
- * Home's copy. Every window matters, but five meters is most of a phone
- * screen, so a narrow one leads with the window that will actually stop you
- * and folds the rest behind their own count. Nothing is dropped.
- */
-function homeUsageHtml() {
-  const rows = usageRows();
-  if (!rows.length) return '';
-  if (!isNarrow() || rows.length === 1) return rows.map(meterHtml).join('');
-  const lead = tightest();
-  const rest = rows.filter((r) => r !== lead);
-  return meterHtml(lead) + `
-    <details class="fold">
-      <summary>${plural(rest.length, 'more window')}</summary>
-      <div class="usage-rest">${rest.map(meterHtml).join('')}</div>
-    </details>`;
-}
-
-/** One sentence a person can act on, used by the block note and the pill. */
+/** One sentence a person can act on, used by the sheet, the chip and the toast. */
 export function usageSentence() {
   if (state.usageError) return `Couldn’t read your limits — ${state.usageError}`;
-  const r = tightest();
-  if (!r) return 'No usage readings yet — your desktop reports these when it starts up.';
-  const pct = Math.round(Number(r.pct));
-  const name = WINDOW_LABEL[r.window_type] ?? r.window_type;
-  const reset = future(r.resets_at)
-    ? ` It resets ${dayClock(r.resets_at)}, in ${until(r.resets_at)}.`
-    : '';
-  const read = state.usageAt ? ` Read ${ago(state.usageAt)} ago.` : '';
-  return `${name} is your tightest window: ${100 - pct}% left.${reset}${read}`;
+  // `since`, not `ago`: "read now ago" is what a fresh read used to say.
+  const read = state.usageAt ? ` Read ${since(state.usageAt)}.` : '';
+  return `${sentence(usageList())}${usageList().length ? read : ''}`;
 }
 
 /**
@@ -373,95 +323,44 @@ function freshnessHtml() {
 }
 
 export function renderUsage() {
-  const inner = usageHtml();
-  const home = homeUsageHtml();
-  $('usage-home').innerHTML = home;
-  $('usage-home').hidden = !home;
-  for (const id of ['usage-new', 'usage-side']) {
+  const list = usageList();
+  const inner = list.map(meterHtml).join('');
+  const bare = !jobList().length && !state.projects.length && !state.loading;
+
+  // The same meters, drawn wherever you might be asking: the front page, the
+  // sheet behind the chip, the new-project screen, and the desktop sidebar.
+  for (const id of ['usage-agents', 'usage-new', 'usage-side', 'usage-sheet-list']) {
     const el = $(id);
     el.innerHTML = inner;
     el.hidden = !inner;
   }
-  // Home already leads with these; no need to print them twice.
-  $('usage-side').hidden = !inner || route.view === 'home';
+  $('usage-new-block').hidden = !inner;
+  // The front page already leads with them; no need to print them twice.
+  $('usage-side').hidden = !inner || route.view === 'agents';
   $('usage-empty').hidden = Boolean(inner) || Boolean(state.usageError);
+  $('usage-block').hidden = bare && !inner && !state.usageError;
   $('usage-foot').innerHTML = freshnessHtml();
+  $('usage-sheet-foot').innerHTML = freshnessHtml();
+  $('usage-sheet-lead').textContent = usageSentence();
 
-  const r = tightest();
-  $('usage-note').textContent = r
-    ? `${Math.max(0, 100 - Math.round(Number(r.pct)))}% left on ${
-      WINDOW_SHORT[r.window_type] ?? r.window_type}`
-    : '';
+  const lead = tightest(list);
+  $('usage-note').textContent = lead
+    ? `${lead.left}% left on ${lead.short}` : '';
 
+  // The chip: how much, and how long. Its title and accessible name carry the
+  // whole sentence, since the chip has room for two short figures only.
+  const c = chip(list);
   const pill = $('usage-pill');
-  pill.hidden = !r;
-  if (r) {
-    const pct = Math.round(Number(r.pct));
-    const { tone, word } = level(pct);
-    pill.classList.remove('warn', 'full');
-    if (tone) pill.classList.add(tone);
-    // The pill has room for a number; the accessible name carries the word
-    // that goes with the colour, and the sentence behind both.
-    pill.title = usageSentence();
-    pill.setAttribute('aria-label', `Usage ${word} — ${usageSentence()}`);
-    $('usage-pill-text').innerHTML = `${pct}%<span class="pill-sub"> ${
-      esc(WINDOW_SHORT[r.window_type] ?? '')}</span>`;
-  }
-}
-
-// ── activity (runs per day) ───────────────────────────────────────────
-
-const DAYS = 14;
-
-/**
- * Fourteen columns, one per day, counting the runs you started. One series, so
- * no legend: the heading names it and today's column is the only coloured one.
- * The busiest day is labelled directly; the rest live in the hover title.
- */
-function activityHtml(jobs) {
-  const now = new Date();
-  const days = [];
-  for (let i = DAYS - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    days.push({ date: d, key: dayKey(d), n: 0 });
-  }
-  const index = new Map(days.map((d) => [d.key, d]));
-  for (const j of jobs) {
-    const day = index.get(dayKey(j.created_at));
-    if (day) day.n++;
-  }
-
-  const max = Math.max(1, ...days.map((d) => d.n));
-  const peak = days.reduce((best, d) => (d.n > best.n ? d : best), days[0]);
-  const total = days.reduce((sum, d) => sum + d.n, 0);
-
-  const label = (d) => `${weekday(d.date)} ${d.date.toLocaleDateString([], {
-    month: 'short', day: 'numeric' })} · ${plural(d.n, 'run')}`;
-
-  const cols = days.map((d, i) => {
-    const today = i === DAYS - 1;
-    const show = d.n > 0 && d === peak && d.n > 1;
-    return `
-      <div class="bar-col${today ? ' today' : ''}" title="${esc(label(d))}"
-           role="img" aria-label="${esc(label(d))}">
-        <span class="bar-val${show ? '' : ' hide'}">${d.n}</span>
-        <span class="bar-wrap"><i class="bar" style="height:${
-          d.n ? Math.max(6, Math.round((d.n / max) * 100)) : 0}%"></i></span>
-      </div>`;
-  }).join('');
-
-  return {
-    total,
-    peak,
-    html: `
-      <div class="bars">${cols}</div>
-      <div class="chart-foot">
-        <span>${esc(days[0].date.toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>
-        <span class="chart-base" aria-hidden="true"></span>
-        <span>today</span>
-      </div>`,
-  };
+  pill.hidden = !c;
+  if (!c) return;
+  pill.classList.remove('warn', 'full');
+  if (c.reading.tone) pill.classList.add(c.reading.tone);
+  pill.dataset.state = c.reading.state;
+  $('usage-ring').setAttribute('stroke-dasharray', `${c.fill} ${100 - c.fill}`);
+  pill.title = usageSentence();
+  pill.setAttribute('aria-label', `Usage ${c.reading.word} — ${usageSentence()}`);
+  $('usage-pill-text').innerHTML = `${esc(c.text)}${
+    c.sub ? `<span class="pill-sub"> ${esc(c.sub)}</span>` : ''}`;
 }
 
 // ── suggestions ───────────────────────────────────────────────────────
@@ -525,11 +424,6 @@ export function renderSuggestions() {
     ? `${fromYours} from your ${plural(new Set(all.filter((s) => s.slug).map((s) => s.slug)).size,
       'project')}`
     : 'ideas to get you started';
-
-  const home = all.slice(0, 3);
-  $('suggest-list').innerHTML = home.map(suggestionHtml).join('');
-  $('suggest-block').hidden = !home.length;
-  $('suggest-note').textContent = note;
 
   $('suggest-new').innerHTML = all.map(suggestionHtml).join('');
   $('suggest-new-note').textContent = note;
@@ -660,7 +554,7 @@ export function renderIdeaBadge() {
   const n = suggest({ ...input, limit: 24 }).filter((s) => s.kind !== 'starter').length
     + ideas({ ...input, limit: 30 }).length;
   $('ideas-count').textContent = String(n);
-  $('ideas-teaser').textContent = `All ${n} ideas`;
+  $('ideas-teaser').textContent = `All ${n} ideas, read off your own work`;
 }
 
 // ── projects (everything you have, and where each one is live) ────────
@@ -779,9 +673,10 @@ export function renderProjectBadge() {
 }
 
 // ── agents (every run at once) ────────────────────────────────────────
-// The fleet screen. Home answers "is anything happening"; this one answers
-// "what are all of them doing, and what is the queue waiting for" — which is
-// the question you get as soon as more than one agent can run.
+// The front page. It answers "is anything happening", then "what are all of
+// them doing, and what is the queue waiting for" — the question you get as
+// soon as more than one agent can run — and sits your limits right under it,
+// because what is running is mostly a question of what you have left.
 
 /**
  * The ceiling in a sentence. Three cases, and the difference between them
@@ -802,23 +697,11 @@ export function slotsSentence() {
 
 /** Why the cloud runner, when it last looked, chose to leave this job. */
 const CLOUD_WHY = {
-  cap: ['over its cap', 'over its usage cap — starts when the window resets'],
-  'pc-only': ['PC only', 'only on your PC, not GitHub — starts when your PC is on'],
-  pc: ['left for PC', 'left for your desktop, which was awake'],
+  cap: 'over its usage cap — starts when the window resets',
+  'pc-only': 'only on your PC, not GitHub — starts when your PC is on',
+  pc: 'left for your desktop, which was awake',
 };
 const cloudWhy = (job) => CLOUD_WHY[state.cloudWhy?.get(String(job.id))] ?? null;
-
-/** The same answer in the width of a table column. */
-function shortWait(job) {
-  const w = fleetNow().waiting.find((x) => x.job.id === job.id);
-  if (!w) return 'queued';
-  if (w.reason === 'wake' && cloudWhy(job)) return cloudWhy(job)[0];
-  if (w.reason === 'project') return `behind ${w.job.project_slug}`;
-  if (w.reason === 'slot') return w.ahead ? `${w.ahead} ahead` : 'for a slot';
-  if (w.reason === 'host') return 'no desktop';
-  if (w.reason === 'wake') return 'starting';
-  return 'next up';
-}
 
 /** Why one queued job hasn't started, in the words this account can justify. */
 function waitLabel({ reason, job, label }) {
@@ -826,7 +709,7 @@ function waitLabel({ reason, job, label }) {
   if (reason === 'host') {
     return state.host ? 'your desktop is offline' : 'no desktop has checked in';
   }
-  if (reason === 'wake' && cloudWhy(job)) return cloudWhy(job)[1];
+  if (reason === 'wake' && cloudWhy(job)) return cloudWhy(job);
   if (reason === 'wake') return 'starting in the cloud — a few seconds';
   if (reason === 'host' && state.cloudRefused) return `the cloud runner refused: ${state.cloudRefused}`;
   if (reason === 'next') return 'next up — claimed within seconds';
@@ -913,13 +796,21 @@ export function renderAgents() {
   $('fleet-pips').setAttribute('aria-label',
     `${f.used} of ${f.max} slots busy${f.paused.length ? `, ${f.paused.length} paused` : ''}`);
 
-  const chip = (status, text) => `<span class="stat-chip"${status ? ` data-status="${status}"` : ''}>${
+  const statChip = (status, text) => `<span class="stat-chip"${status ? ` data-status="${status}"` : ''}>${
     status ? '<i class="dot"></i>' : ''}${text}</span>`;
-  const chips = [chip('', `<b>${f.used}</b> of <b>${f.max}</b> slots busy`)];
-  if (f.paused.length) chips.push(chip('paused', `<b>${f.paused.length}</b> paused for usage`));
-  if (f.blocked) chips.push(chip('queued', `<b>${f.blocked}</b> waiting for a slot`));
-  if (f.over) chips.push(chip('paused', `<b>${f.over}</b> over the ceiling`));
-  if (!state.hostFresh && !state.cloud) chips.push(chip('paused', 'desktop offline'));
+  const chips = [statChip('', `<b>${f.used}</b> of <b>${f.max}</b> slots busy`)];
+  if (f.paused.length) chips.push(statChip('paused', `<b>${f.paused.length}</b> paused for usage`));
+  if (f.blocked) chips.push(statChip('queued', `<b>${f.blocked}</b> waiting for a slot`));
+  if (f.over) chips.push(statChip('paused', `<b>${f.over}</b> over the ceiling`));
+  // The newest settled run decides it: one that finished after a sign-in
+  // failure means the desktop has logged back in.
+  const lastSettled = jobList().filter((j) => j.status === 'done' || j.status === 'error')
+    .sort(newest)[0];
+  if (lastSettled?.status === 'error' && signedOut(lastSettled.error)) {
+    chips.push(`<a class="stat-chip" data-status="error" href="${esc(jobHref(lastSettled))}"
+      title="${esc(SIGNED_OUT_FIX)}"><i class="dot"></i>desktop signed out — run /login</a>`);
+  }
+  if (!state.hostFresh && !state.cloud) chips.push(statChip('paused', 'desktop offline'));
   $('fleet-chips').innerHTML = chips.join('');
 
   for (const el of document.querySelectorAll('#slots input[name="slots"]')) {
@@ -944,6 +835,8 @@ export function renderAgents() {
     ? `last ${ago(settled[0].created_at)} ago` : '';
 
   $('stop-all').hidden = f.active.length < 2;
+
+  $('desktop-card').innerHTML = desktopHtml();
 }
 
 /** How many agents are in flight, on every door into this view. */
@@ -957,138 +850,15 @@ export function renderFleetBadge() {
 
 /** The bottom tabs on a phone: which section you are in. */
 export function renderTabs() {
-  const doors = [['tab-home', 'home'], ['tab-ask', 'ask'], ['tab-agents', 'agents'],
-    ['tab-house', 'house'], ['tab-new', 'new'], ['tab-projects', 'projects'],
-    ['tab-ideas', 'ideas']];
+  const doors = [['tab-agents', 'agents'], ['tab-ask', 'ask'], ['tab-new', 'new'],
+    ['tab-house', 'house'], ['tab-projects', 'projects']];
   for (const [id, view] of doors) {
     if (route.view === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
   }
 }
 
-// ── home ──────────────────────────────────────────────────────────────
-
-const pct = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : '—');
-
-/** Running first, then paused, then the queue — urgency, not arrival. */
-const URGENCY = { running: 0, paused: 1, queued: 2 };
-const byUrgency = (a, b) => (URGENCY[a.status] - URGENCY[b.status]) || oldest(a, b);
-
-export function renderHome() {
-  const all = jobList();
-  const active = all.filter(isActive).sort(byUrgency);
-  const running = active.filter((j) => j.status === 'running');
-  const paused = active.filter((j) => j.status === 'paused');
-  const queued = active.filter((j) => j.status === 'queued');
-  const finished = all.filter((j) => j.status === 'done');
-  const failed = all.filter((j) => j.status === 'error');
-
-  const f = fleetNow();
-  const bare = !all.length && !state.projects.length && !state.loading;
-  $('home-empty').hidden = !bare;
-  // On a brand-new account the empty state is the whole page — a big zero
-  // above it is noise.
-  for (const id of ['hero-card', 'active-block', 'usage-block', 'glance-block',
-    'recent-block', 'activity-block', 'desktop-block', 'suggest-block']) {
-    $(id).hidden = bare;
-  }
-
-  // One hero figure per view: what is happening right now.
-  $('hero-value').textContent = String(running.length);
-  $('hero-label').textContent = running.length === 1 ? 'agent running' : 'agents running';
-  $('hero-eyebrow').textContent = state.loading ? 'Loading…' : 'Right now';
-
-  // The hero says how many; this line says what, which is the part you want.
-  const lead = running[0];
-  const act = lead ? lastActivity(lead.id) : null;
-  $('hero-now').hidden = bare || !lead;
-  if (lead) {
-    $('hero-now').innerHTML = `${icon('pulse')}<span><b>${esc(lead.project_slug ?? 'naming…')}</b>
-      — ${esc(clip(act ? act.text : lead.prompt, 90))}</span>`;
-  }
-
-  const chip = (status, text) => `
-    <span class="stat-chip" data-status="${esc(status)}"><i class="dot"></i>${text}</span>`;
-  const chips = [];
-  if (active.length) {
-    chips.push(`<a class="stat-chip" href="#/agents"><b>${f.used}</b> of <b>${f.max}</b> slots busy</a>`);
-  }
-  if (paused.length) chips.push(chip('paused', `<b>${paused.length}</b> paused for usage`));
-  if (f.blocked) chips.push(chip('queued', `<b>${f.blocked}</b> waiting for a slot`));
-  else if (queued.length) {
-    chips.push(chip('queued', `<b>${queued.length}</b> ${state.cloud ? 'starting' : 'waiting on desktop'}`));
-  }
-  if (!active.length && !bare) {
-    chips.push(`<span class="stat-chip">Nothing in progress</span>`);
-  }
-  // The newest settled run decides it: one that finished after a sign-in
-  // failure means the desktop has logged back in.
-  const lastSettled = all.filter((j) => j.status === 'done' || j.status === 'error')
-    .sort(newest)[0];
-  if (lastSettled?.status === 'error' && signedOut(lastSettled.error)) {
-    chips.push(`<a class="stat-chip" data-status="error" href="${esc(jobHref(lastSettled))}"
-      title="${esc(SIGNED_OUT_FIX)}"><i class="dot"></i>desktop signed out — run /login</a>`);
-  }
-  if (!state.hostFresh && !bare && !state.cloud) {
-    chips.push(`<span class="stat-chip" data-status="paused"><i class="dot"></i>desktop offline</span>`);
-  }
-  $('hero-chips').innerHTML = chips.join('');
-
-  // Home leads with the fleet rather than listing it: three rows, then the
-  // door to the screen that holds all of them.
-  const LEAD = 3;
-  $('active-block').hidden = bare || !active.length;
-  $('active-count').textContent = active.length ? String(active.length) : '';
-  $('active-list').innerHTML = state.loading && !active.length
-    ? '<div class="skel skel-row"></div>'
-    : active.slice(0, LEAD).map(jobRow).join('');
-  $('active-note').textContent = active.length > LEAD ? `showing ${LEAD} of ${active.length}` : '';
-  $('active-more').hidden = !active.length;
-  $('active-more-text').textContent = active.length > LEAD
-    ? `All ${active.length} agents` : 'Every agent, and the queue';
-
-  const slugs = new Set(all.map((j) => j.project_slug).filter(Boolean));
-  const turns = finished.reduce((sum, j) => sum + (Number(j.num_turns) || 0), 0);
-  const settled = finished.length + failed.length;
-
-  $('kpi-projects').textContent = String(state.projects.length || slugs.size);
-  $('kpi-projects-note').textContent = slugs.size
-    ? `${slugs.size} worked on so far` : 'none run yet';
-  $('kpi-done').textContent = String(finished.length);
-  $('kpi-done-note').textContent = turns ? `${plural(turns, 'turn')} of work` : '';
-  $('kpi-failed').textContent = String(failed.length);
-  $('kpi-failed-note').textContent = failed.length
-    ? 'open one to retry' : 'nothing broken';
-  $('kpi-failed').closest('.tile').classList.toggle('flag', failed.length > 0);
-  $('kpi-rate').textContent = pct(finished.length, settled);
-  $('kpi-rate-note').textContent = settled ? `of ${plural(settled, 'finished run')}` : 'no runs yet';
-
-  const strip = activityHtml(all);
-  $('activity-block').hidden = bare || !all.length;
-  $('activity').innerHTML = strip.html;
-  $('activity-note').textContent = strip.total
-    ? `${plural(strip.total, 'run')} · busiest ${weekday(strip.peak.date)} (${strip.peak.n})`
-    : 'nothing started yet';
-
-  const recent = all.filter((j) => !isActive(j)).sort(newest).slice(0, 5);
-  $('recent-block').hidden = bare || !recent.length;
-  $('recent-list').innerHTML = recent.map(jobRow).join('');
-
-  $('desktop-card').innerHTML = desktopHtml();
-
-  // The reference half of the page — the strip, the history, the desktop —
-  // is the part a phone has no room for, so there it is one tap behind a
-  // toggle. On a wide screen it is the right-hand column and always open.
-  const folded = isNarrow() && !moreOpen;
-  $('home-more').hidden = bare || folded;
-  $('home-more-toggle').hidden = bare || !isNarrow();
-  $('home-more-toggle').setAttribute('aria-expanded', String(!folded));
-  $('home-more-label').textContent = folded ? 'More detail' : 'Less detail';
-}
-
-/** Whether home's reference blocks are open on a narrow screen. */
-let moreOpen = false;
-export const toggleHomeMore = () => { moreOpen = !moreOpen; return moreOpen; };
+// ── the runner ────────────────────────────────────────────────────────
 
 /** The runner on your PC, spelled out — the pill only has room for a word. */
 function desktopHtml() {
@@ -1380,51 +1150,6 @@ export function renderAskBadge() {
   pip.hidden = !n;
 }
 
-/**
- * Home's half of the merge: whether the assistant is there, what you last
- * said to it, and a way in without opening the screen first.
- */
-export function renderAskHome() {
-  const who = askPresence();
-  const all = askChats();
-  const latest = all[0] ?? null;
-  const queue = askPending();
-
-  $('ask-block-note').textContent = presenceWord(who);
-
-  const rows = [
-    ['Assistant', who.known ? esc(who.name) : 'none has checked in'],
-    ['State', who.known
-      ? `<span class="state" data-status="${who.online ? 'done' : 'paused'}">
-           <i class="dot${who.online ? ' live' : ''}"></i>${who.online ? 'online'
-             : state.cloud ? 'asleep' : 'offline'}</span>`
-      : '<span class="state" data-status="error"><i class="dot"></i>never seen</span>'],
-    ['Last heard', who.lastSeen
-      ? `<span data-since="${esc(who.lastSeen)}">${since(who.lastSeen)}</span>`
-      : '—'],
-    ['Conversations', all.length
-      ? `${plural(all.length, 'thread')}${queue.length ? ` · ${queue.length} answering` : ''}`
-      : 'none yet'],
-  ];
-
-  $('ask-card').innerHTML = rows.map(([k, v]) => `
-    <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
-    .join('') + `<p class="info-note">${esc(askExplainer())}</p>`;
-
-  // Carry on where you were, or open with something worth asking.
-  const quick = latest && latest.messages.length
-    ? [`<a class="chip" href="${esc(askHref(latest.id))}">${icon('brain')}<span>${
-        esc(clip(latest.title, 80))}</span></a>`]
-    : [];
-  // Whole sentences, wrapped by the CSS: clipped to 34 characters they read as
-  // "What can you do that a hosted ass…" on a phone, which says nothing.
-  for (const [i, st] of STARTERS.slice(0, 2).entries()) {
-    quick.push(`<button type="button" class="chip" data-ask-starter="${i}">${
-      icon(st.icon)}<span>${esc(st.text)}</span></button>`);
-  }
-  $('ask-quick').innerHTML = quick.join('');
-}
-
 // ── your house ────────────────────────────────────────────────────────
 // The third thing this app relays, and the one you will open most often —
 // so it is built for the two-second visit: what is on, and the tap that
@@ -1698,53 +1423,6 @@ export function renderHouseBadge() {
   const pip = $('tab-house-count');
   pip.textContent = n ? String(n) : '';
   pip.hidden = !n;
-}
-
-/**
- * Home's corner of the house: whether it is reachable, what is on, and the
- * one tap worth having without opening the screen. Hidden outright for an
- * account with no hub — most accounts — rather than advertising a feature
- * nobody asked for.
- */
-export function renderHouseHome() {
-  const who = housePresence();
-  const st = houseState();
-  const devices = houseDevices();
-  const s = houseSummaryNow();
-
-  const show = who.known || devices.length > 0;
-  $('house-block').hidden = !show;
-  if (!show) return;
-
-  $('house-block-note').textContent = st.label;
-
-  const carrying = who.relays?.find((r) => r.id === who.relay) ?? null;
-  const rows = [
-    ['Hub', who.known ? esc(who.name) : 'none has checked in'],
-    ['State', `<span class="state" data-status="${st.kind === 'ok' ? 'done'
-      : st.kind === 'hub-off' ? 'error' : 'paused'}">
-         <i class="dot${st.kind === 'ok' ? ' live' : ''}"></i>${esc(st.label)}</span>`],
-    ['Relayed', carrying
-      ? `${esc(carrying.where)}${who.online > 1 ? esc(` · ${who.online} relays up`) : ''}`
-      : 'nothing is relaying'],
-    ['On right now', s.on ? esc(s.sentence) : 'nothing'],
-    ['Last heard', who.lastSeen
-      ? `<span data-since="${esc(who.lastSeen)}">${since(who.lastSeen)}</span>`
-      : '—'],
-  ];
-
-  $('house-card').innerHTML = rows.map(([k, v]) => `
-    <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${v}</span></div>`)
-    .join('') + `<p class="info-note">${esc(st.note)}</p>`;
-
-  const lit = litLights(devices);
-  const quick = [];
-  if (lit.length) {
-    quick.push(`<button type="button" class="chip" data-house-all="lights-off">${icon('bulb')}<span>turn ${
-      plural(lit.length, 'light')} off</span></button>`);
-  }
-  quick.push(`<a class="chip" href="#/house">${icon('house')}<span>every room</span></a>`);
-  $('house-home-quick').innerHTML = quick.join('');
 }
 
 // ── project chat ──────────────────────────────────────────────────────

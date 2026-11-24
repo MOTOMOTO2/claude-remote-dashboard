@@ -120,6 +120,17 @@ export function until(iso, now = Date.now()) {
   return h ? `${d}d ${h}h` : `${d}d`;
 }
 
+/**
+ * `until`, as the end of a sentence: "in 2d 4h" · "in 40m" · "any moment now".
+ * "in any moment" is not English, and a countdown that ticks has to keep
+ * saying it right as it runs out.
+ */
+export function untilPhrase(iso, now = Date.now()) {
+  const t = until(iso, now);
+  if (!t) return '';
+  return t === 'any moment' ? 'any moment now' : `in ${t}`;
+}
+
 /** A finished run's wall-clock duration, or '' if we can't know it. */
 export function span(from, to) {
   if (!from || !to) return '';

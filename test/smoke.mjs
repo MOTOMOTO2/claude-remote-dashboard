@@ -77,7 +77,9 @@ ok('boot splash is hidden once the session is known', el('boot').hidden);
 ok('sign-in form is shown when there is no session', !el('auth').hidden);
 ok('app shell is hidden when signed out', el('app').hidden);
 
-// ── 5. sign in → home ─────────────────────────────────────────────────
+// ── 5. sign in → the front page ───────────────────────────────────────
+// There is no home screen. The front page is the fleet, with your limits
+// right under it: what is running, and what you have left to run it with.
 
 el('email').value = 'me@example.com';
 el('password').value = 'hunter2';
@@ -87,29 +89,42 @@ await tick();
 ok('app shell is shown after sign-in', !el('app').hidden);
 ok('sign-in form is hidden after sign-in', el('auth').hidden);
 
-ok('hero counts the running agents', text('hero-value') === '1', `got ${text('hero-value')}`);
-ok('hero label is singular for one agent', text('hero-label') === 'agent running');
-has('hero chips mention the paused job', el('hero-chips').innerHTML, 'paused for usage');
+ok('there is no home screen or home tab any more', !el('home-view') && !el('tab-home'));
+ok('a bare address lands on the fleet', !el('agents-view').hidden, `hash "${window.location.hash}"`);
+ok('and the topbar names it', text('view-title') === 'Agents', text('view-title'));
+ok('the agents door is the one marked current',
+  el('agents-link').getAttribute('aria-current') === 'page');
+ok('and no other door is',
+  ['ask', 'house', 'projects', 'ideas'].every((d) => !el(`${d}-link`).hasAttribute('aria-current')));
+ok('and its tab is marked too', el('tab-agents').getAttribute('aria-current') === 'page');
+ok('the composer stays away on the front page', el('composer').hidden);
 
-ok('live block is visible', !el('active-block').hidden);
-ok('live block lists the two open jobs', el('active-list').querySelectorAll('.row').length === 2);
-ok('every live row links somewhere real',
-  [...el('active-list').querySelectorAll('.row')].every((r) => /#\/(p|j)\/.+/.test(r.getAttribute('href'))));
-has('live row shows the current activity', el('active-list').innerHTML, 'Edit src/game.js');
+ok('hero counts the running agents', text('fleet-value') === '1', `got ${text('fleet-value')}`);
+ok('hero label is singular for one agent', text('fleet-label') === 'agent running');
+has('hero chips mention the paused job', el('fleet-chips').innerHTML, 'paused for usage');
+ok('an agent in flight gets a card each, running and paused',
+  el('fleet-list').querySelectorAll('.agent').length === 2);
+has('a card shows the current activity', el('fleet-list').innerHTML, 'Edit src/game.js');
+ok('every card opens its thread',
+  [...el('fleet-list').querySelectorAll('.agent-name')].every((a) => /#\/(p|j)\/.+/.test(a.getAttribute('href'))));
 
-const meters = el('usage-home').querySelectorAll('.meter');
+// ── 5b. the limits ────────────────────────────────────────────────────
+// Under the hero, and the part that has to say *when* and *how long*.
+
+const meters = el('usage-agents').querySelectorAll('.meter');
 ok('three usage meters render', meters.length === 3, `got ${meters.length}`);
-has('meter is labelled in words', el('usage-home').innerHTML, 'Session · 5 hours');
-has('meter prints its percentage', el('usage-home').innerHTML, '42%');
-has('meter prints the headroom too', el('usage-home').innerHTML, '58% left');
+has('meter is labelled in words', el('usage-agents').innerHTML, '5-hour session');
+has('meter prints its percentage', el('usage-agents').innerHTML, '42%');
+has('meter prints the headroom too', el('usage-agents').innerHTML, '58% left');
 ok('high usage meter carries the severity class',
-  el('usage-home').querySelectorAll('.meter.full').length === 1);
+  el('usage-agents').querySelectorAll('.meter.full').length === 1);
 ok('mid usage meter carries the warn class',
-  el('usage-home').querySelectorAll('.meter.warn').length === 1);
+  el('usage-agents').querySelectorAll('.meter.warn').length === 1);
 ok('meter fill width matches the value',
-  el('usage-home').querySelector('.meter-fill').getAttribute('style').includes('42%'));
-has('severity ships as a word, not just a colour', el('usage-home').innerHTML, 'nearly out');
-has('a healthy window says so', el('usage-home').innerHTML, 'healthy');
+  el('usage-agents').querySelector('.meter-fill').getAttribute('style').includes('42%'));
+has('severity ships as a word, not just a colour', el('usage-agents').innerHTML, 'nearly out');
+has('a healthy window says so', el('usage-agents').innerHTML, 'healthy');
+has('the block says which window is tightest', text('usage-note'), '12% left on week');
 
 // The weekly window resets in ~2.8 days, so it has to name the day and not
 // just a clock — the bug this block exists to pin down.
@@ -120,10 +135,14 @@ has('the weekly meter names the day it resets', weeklyMeter.textContent, weeklyD
 has('the weekly meter still gives the time', weeklyMeter.textContent,
   weeklyReset.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
 has('the weekly meter counts down as well', weeklyMeter.textContent, 'in 2d');
+has('and says it in words, so the clock is not all there is', weeklyMeter.textContent, 'Resets');
 ok('the 5-hour meter does not bother with a weekday',
   !/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/.test(
-    [...meters].find((m) => m.textContent.includes('5 hours')).textContent));
-has('a window with no reset time admits it', el('usage-home').innerHTML, 'reset time unknown');
+    [...meters].find((m) => m.textContent.includes('5-hour')).textContent));
+has('a window the runner gave no reset for says so, plainly',
+  el('usage-agents').innerHTML, 'Reset time not reported');
+ok('and never says "unknown", which tells you nothing',
+  !el('usage-agents').textContent.includes('unknown'));
 
 // A frozen meter and a quiet account look identical unless the page says
 // which it is, so the block reports when it last read.
@@ -132,15 +151,16 @@ has('nothing claims the numbers moved on a first read',
   text('usage-foot'), 'unchanged so far');
 
 // The refresh re-reads on demand — the same path the 10-second timer takes.
-fake.tables.usage_windows = [
-  { window_type: 'five_hour', pct: 71, resets_at: iso(-60) },
-  { window_type: 'seven_day', pct: 88, resets_at: iso(-4000) },
-  { window_type: 'seven_day_opus', pct: 65, resets_at: null },
+const readings = (a, b, c) => [
+  { window_type: 'five_hour', pct: a, resets_at: iso(-60) },
+  { window_type: 'seven_day', pct: b, resets_at: iso(-4000) },
+  { window_type: 'seven_day_opus', pct: c, resets_at: null },
 ];
+fake.tables.usage_windows = readings(71, 88, 65);
 el('usage-refresh').click();
 await tick();
-has('a re-read updates the meter', el('usage-home').innerHTML, '71%');
-has('and the headroom with it', el('usage-home').innerHTML, '29% left');
+has('a re-read updates the meter', el('usage-agents').innerHTML, '71%');
+has('and the headroom with it', el('usage-agents').innerHTML, '29% left');
 has('a changed reading is reported as changed', text('usage-foot'), 'changed');
 ok('and no longer claims it is unchanged',
   !text('usage-foot').includes('unchanged'), text('usage-foot'));
@@ -152,69 +172,100 @@ el('usage-refresh').click();
 await tick();
 has('a failed read says so', text('usage-foot'), 'couldn’t read the limits');
 has('and names the reason', text('usage-foot'), 'permission denied');
-has('the last good reading is still on screen', el('usage-home').innerHTML, '71%');
+has('the last good reading is still on screen', el('usage-agents').innerHTML, '71%');
 ok('it is not mistaken for an empty account', el('usage-empty').hidden);
 fake.failTable('usage_windows', null);
 el('usage-refresh').click();
 await tick();
 ok('recovering clears the error', !text('usage-foot').includes('couldn’t'));
 
+// A reading with no reset time ahead of it is one of three different things,
+// and "reset time unknown" for all of them is what this was written to end.
+fake.tables.usage_windows = [
+  { window_type: 'five_hour', pct: 0, resets_at: null },            // nothing used: not started
+  { window_type: 'seven_day', pct: 88, resets_at: iso(120) },       // its reset was two hours ago
+  { window_type: 'seven_day_opus', pct: 65, resets_at: null },      // used, but not said when
+];
+el('usage-refresh').click();
+await tick();
+const win = (type) => [...el('usage-agents').querySelectorAll('.meter')]
+  .find((m) => m.dataset.window === type);
+has('a window that has not started says when it will', win('five_hour').textContent,
+  'Starts with your next message');
+has('and how long you will have once it does', win('five_hour').textContent, 'lasts 5 hours');
+ok('and is not drawn as anything used', win('five_hour').querySelector('.meter-fill')
+  .getAttribute('style').includes('width:0%'));
+ok('a window read before its reset is not drawn as nearly out',
+  !win('seven_day').classList.contains('full') && !win('seven_day').classList.contains('warn'));
+has('it says it has reset', win('seven_day').textContent, 'Reset');
+has('and that the number is out of date', win('seven_day').textContent, 'waiting for a new reading');
+has('with the old figure marked as old', win('seven_day').textContent, 'was 88%');
+ok('and no headroom is claimed from a number that is out of date',
+  !win('seven_day').textContent.includes('% left'));
+has('what is still counting is the one that leads', text('usage-note'), '35% left on week · Opus');
+has('and the chip reports that, not the window that already reset',
+  text('usage-pill-text'), '65%');
+fake.tables.usage_windows = readings(71, 88, 65);
+el('usage-refresh').click();
+await tick();
+
 // the topbar carries the tightest window, so a limit is never a surprise
 ok('the usage pill is shown', !el('usage-pill').hidden);
 has('the usage pill reports the tightest window', text('usage-pill-text'), '88%');
+has('and how long until it resets, which is the other half', text('usage-pill-text'), '2d');
 ok('the usage pill wears that severity', el('usage-pill').classList.contains('full'));
 has('the usage pill explains itself in words',
   el('usage-pill').getAttribute('aria-label'), 'tightest window');
 has('and names the reset day there too', el('usage-pill').getAttribute('aria-label'), weeklyDay);
+ok('the ring is filled to the figure', el('usage-ring').getAttribute('stroke-dasharray') === '88 12',
+  el('usage-ring').getAttribute('stroke-dasharray'));
+ok('a fresh read does not say "read now ago"',
+  !el('usage-pill').getAttribute('aria-label').includes('now ago'));
 
-ok('project tile counts the projects', text('kpi-projects') === '4', `got ${text('kpi-projects')}`);
-has('project tile says how many have been run', text('kpi-projects-note'), '3 worked on');
-ok('finished tile counts done jobs', text('kpi-done') === '1');
-has('finished tile adds up the turns', text('kpi-done-note'), '14 turns');
-ok('failed tile counts errors', text('kpi-failed') === '1');
-ok('failed tile is flagged', el('kpi-failed').closest('.tile').classList.contains('flag'));
-ok('first-try rate is a share of the settled runs', text('kpi-rate') === '50%', `got ${text('kpi-rate')}`);
-has('first-try rate names its denominator', text('kpi-rate-note'), '2 finished runs');
+// Tapping the chip opens every window in a sheet — a toast was gone before a
+// day and a time had been read.
+ok('the sheet starts closed', !el('usage-sheet').open);
+el('usage-pill').focus();
+el('usage-pill').click();
+await tick();
+ok('tapping the chip opens the sheet', el('usage-sheet').open);
+has('it leads with the sentence', text('usage-sheet-lead'), 'tightest window');
+ok('and lists every window', el('usage-sheet-list').querySelectorAll('.meter').length === 3);
+has('with when each resets', el('usage-sheet-list').textContent, 'Resets');
+has('and how long that is', el('usage-sheet-list').textContent, 'in 2d');
+has('and when it was last read', text('usage-sheet-foot'), 'last read');
+fake.tables.usage_windows = readings(72, 88, 65);
+el('toasts').innerHTML = '';          // the front page's own refreshes toasted earlier
+el('usage-sheet-refresh').click();
+await tick();
+has('refreshing from inside it updates it in place', el('usage-sheet-list').innerHTML, '72%');
+ok('without a toast hiding behind it', !el('toasts').textContent.includes('tightest'));
+el('usage-sheet-lead').click();
+ok('a tap inside the sheet leaves it open', el('usage-sheet').open);
+el('usage-sheet').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+ok('a tap on the page behind it closes it', !el('usage-sheet').open);
+ok('and puts focus back on the chip', window.document.activeElement === el('usage-pill'));
+el('usage-pill').click();
+await tick();
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+ok('Escape closes it', !el('usage-sheet').open);
+el('usage-pill').click();
+await tick();
+el('usage-sheet-close').click();
+ok('and so does the button', !el('usage-sheet').open);
+fake.tables.usage_windows = readings(71, 88, 65);
+el('usage-refresh').click();
+await tick();
 
-// the hero says how many; the line under it says what
-ok('the hero names what the running agent is doing', !el('hero-now').hidden);
-has('the hero line names the project', el('hero-now').innerHTML, 'alpha');
-has('the hero line quotes the live activity', el('hero-now').innerHTML, 'Edit src/game.js');
-
-// runs per day — one column per day, today's is the marked one
-const cols = el('activity').querySelectorAll('.bar-col');
-ok('the activity strip has a column per day', cols.length === 14, `got ${cols.length}`);
-ok('today is the one marked column',
-  el('activity').querySelectorAll('.bar-col.today').length === 1
-  && cols[13].classList.contains('today'));
-ok('every column is labelled for a screen reader',
-  [...cols].every((c) => /run/.test(c.getAttribute('aria-label') ?? '')));
-has('the heading totals the runs', text('activity-note'), '4 runs');
+ok('the sidebar does not print the meters a second time on the front page', el('usage-side').hidden);
 
 // your desktop, spelled out where the pill has no room to
-has('the desktop card names the host', el('desktop-card').textContent, 'desk-pc');
-has('the desktop card says it is online', el('desktop-card').textContent, 'online');
-has('the desktop card reports the live feed', el('desktop-card').textContent, 'Live updates');
-has('the desktop card says what that means', el('desktop-card').textContent, 'starts right away');
+has('the runner card names the host', el('desktop-card').textContent, 'desk-pc');
+has('the runner card says it is online', el('desktop-card').textContent, 'online');
+has('the runner card reports the live feed', el('desktop-card').textContent, 'Live updates');
+has('the runner card says what that means', el('desktop-card').textContent, 'starts right away');
 has('and when it last checked in, as a phrase rather than "now ago"',
   el('desktop-card').textContent, 'just now');
-
-// suggestions, read off the account as it stands
-has('a failed project is the first thing suggested',
-  el('suggest-list').innerHTML, 'Fix what broke in beta');
-has('a suggestion shows the reason it was offered',
-  el('suggest-list').innerHTML, 'npm install failed');
-has('an untouched repo is offered a look',
-  el('suggest-new').innerHTML, 'Take a look at untouched-repo');
-ok('a project that is mid-run is left alone',
-  !el('suggest-new').innerHTML.includes('alpha'));
-ok('home shows a short list', el('suggest-list').querySelectorAll('.suggest').length === 3);
-ok('the new-project view shows the full list',
-  el('suggest-new').querySelectorAll('.suggest').length === 6);
-has('the heading says where they came from', text('suggest-note'), 'from your 2 projects');
-
-ok('recent block is visible', !el('recent-block').hidden);
-ok('recent block lists finished jobs', el('recent-list').querySelectorAll('.row').length === 2);
 
 ok('sidebar lists three chats and one untouched repo',
   el('project-list').querySelectorAll('.list-item').length === 4,
@@ -222,10 +273,7 @@ ok('sidebar lists three chats and one untouched repo',
 has('sidebar labels the untouched repos', el('project-list').innerHTML, 'Your repos');
 ok('the projects door counts every project', text('projects-count') === '4',
   `got ${text('projects-count')}`);
-ok('no door is marked current on home',
-  !el('projects-link').hasAttribute('aria-current') && !el('ideas-link').hasAttribute('aria-current'));
 has('sidebar shows a running tag', el('project-list').innerHTML, 'data-status="running"');
-ok('composer is hidden on home', el('composer').hidden);
 ok('host pill reads online', el('host-badge').classList.contains('online'));
 has('host name is shown', text('host-name'), 'desk-pc');
 
@@ -245,7 +293,7 @@ window.location.hash = '#/p/alpha';
 await tick();
 
 ok('chat view is shown', !el('chat-view').hidden);
-ok('home view is hidden', el('home-view').hidden);
+ok('the front page steps aside', el('agents-view').hidden);
 ok('composer is shown in a chat', !el('composer').hidden);
 ok('repo visibility is hidden for an existing project', el('visibility-wrap').hidden);
 ok('title is the project name', text('view-title') === 'alpha');
@@ -337,6 +385,25 @@ ok('suggestions render', el('suggest-new').querySelectorAll('.suggest').length >
 ok('an empty-ish account still gets openers',
   el('suggest-new').innerHTML.includes('data-kind="starter"'));
 
+// suggestions, read off the account as it stands
+has('a failed project is the first thing suggested',
+  el('suggest-new').innerHTML, 'Fix what broke in beta');
+has('a suggestion shows the reason it was offered',
+  el('suggest-new').innerHTML, 'npm install failed');
+has('an untouched repo is offered a look',
+  el('suggest-new').innerHTML, 'Take a look at untouched-repo');
+ok('a project that is mid-run is left alone',
+  !el('suggest-new').innerHTML.includes('alpha'));
+ok('the new-project view shows the full list',
+  el('suggest-new').querySelectorAll('.suggest').length === 6);
+has('the heading says where they came from', text('suggest-new-note'), 'from your 2 projects');
+has('the way on to the long list says how long it is', text('ideas-teaser'), 'ideas');
+
+// What you have left is worth knowing before you send a job, so the meters
+// are on this screen too.
+ok('the limits are shown above the composer you are about to use',
+  !el('usage-new-block').hidden && el('usage-new').querySelectorAll('.meter').length === 3);
+
 // A suggestion aimed at a project opens that chat with the prompt loaded —
 // it is a head start, not a send.
 el('suggest-new').querySelector('[data-suggest="fix:beta"]').click();
@@ -381,7 +448,7 @@ await tick();
 
 ok('the ideas view is shown', !el('ideas-view').hidden);
 ok('every other view steps aside',
-  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden);
+  el('agents-view').hidden && el('chat-view').hidden && el('new-view').hidden);
 ok('the composer is out of the way there', el('composer').hidden);
 has('the topbar names it', text('view-title'), 'Ideas');
 
@@ -398,7 +465,7 @@ has('the profile card names a theme it found', el('ideas-profile').textContent, 
 has('the profile card names the evidence', el('ideas-profile').textContent, 'alpha');
 has('the profile card names the stack', el('ideas-profile').textContent, 'node');
 
-// next steps come from the same engine the home block uses
+// next steps come from the same engine the new-project view uses
 ok('next steps are listed too', el('ideas-next').querySelectorAll('.suggest').length >= 2);
 has('a failed project is among them', el('ideas-next').innerHTML, 'Fix what broke in beta');
 ok('no opener pads out the derived list',
@@ -468,7 +535,9 @@ await tick();
 
 ok('the projects view is shown', !el('projects-view').hidden);
 ok('every other view steps aside there',
-  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden && el('ideas-view').hidden);
+  el('agents-view').hidden && el('chat-view').hidden && el('new-view').hidden && el('ideas-view').hidden);
+ok('the desktop sidebar carries the meters here, where the front page does not',
+  !el('usage-side').hidden && el('usage-side').querySelectorAll('.meter').length === 3);
 ok('the composer is out of the way', el('composer').hidden);
 has('the topbar names it', text('view-title'), 'Projects');
 has('the topbar says how many are live', text('view-sub'), '2 live');
@@ -589,7 +658,7 @@ await tick();
 
 ok('the agents view is shown', !el('agents-view').hidden);
 ok('every other view steps aside there',
-  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden
+  el('chat-view').hidden && el('new-view').hidden
   && el('ideas-view').hidden && el('projects-view').hidden);
 ok('the composer is out of the way', el('composer').hidden);
 ok('the bottom tabs stay put where there is no composer', !el('tabbar').hidden);
@@ -715,11 +784,6 @@ for (const id of ['par-1', 'q-gamma']) {
 }
 await tick();
 
-// The short form of the same answer, where a row has no space for a clause.
-window.location.hash = '#/';
-await tick();
-has('a queued row on home says what it is waiting for',
-  el('active-list').textContent, 'for a slot');
 window.location.hash = '#/agents';
 await tick();
 
@@ -734,7 +798,7 @@ await tick();
 
 ok('the assistant view is shown', !el('ask-view').hidden);
 ok('every other view steps aside there',
-  el('home-view').hidden && el('chat-view').hidden && el('new-view').hidden
+  el('chat-view').hidden && el('new-view').hidden
   && el('ideas-view').hidden && el('projects-view').hidden && el('agents-view').hidden);
 ok('the composer comes with it', !el('composer').hidden);
 ok('and takes the bottom of the window from the tabs', el('tabbar').hidden);
@@ -835,7 +899,7 @@ ok('a reply you are watching arrive needs no toast as well',
 
 // One that lands while you are on another screen is the whole point of
 // relaying through your PC, so that one does say so.
-window.location.hash = '#/';
+window.location.hash = '#/projects';
 await tick();
 const away = {
   id: 95, chat_id: 'c1', owner: 'u1', role: 'assistant', status: 'queued',
@@ -996,19 +1060,6 @@ ok('tapping one fills the box rather than sending it',
   el('prompt').value.length > 10 && fake.inserts.length === fresh + 1);
 el('prompt').value = '';
 
-// ── home knows about it too ───────────────────────────────────────────
-
-window.location.hash = '#/';
-await tick();
-has('home names the assistant', el('ask-card').textContent, 'jarvis');
-has('and says it is online', el('ask-card').textContent, 'online');
-has('and counts the conversations', el('ask-card').textContent, 'thread');
-has('and explains what happens if the PC sleeps',
-  el('ask-card').textContent, 'Replies come straight back here');
-has('and when it was last heard from', el('ask-card').textContent, 'just now');
-ok('home offers a way straight in', el('ask-quick').querySelectorAll('a, button').length >= 2);
-ok('the card is a door', el('ask-card').getAttribute('href') === '#/ask');
-
 // ── deleting one ──────────────────────────────────────────────────────
 
 window.location.hash = '#/ask/c2';
@@ -1040,7 +1091,7 @@ await tick();
 
 ok('the house view is shown', !el('house-view').hidden);
 ok('every other view steps aside there',
-  el('home-view').hidden && el('chat-view').hidden && el('ask-view').hidden
+  el('chat-view').hidden && el('ask-view').hidden
   && el('agents-view').hidden && el('projects-view').hidden);
 ok('the composer stays away — there is nothing to type here', el('composer').hidden);
 ok('so the tabs keep the bottom of the window', !el('tabbar').hidden);
@@ -1183,7 +1234,7 @@ fake.tables.house_hubs = [{
 await houseStore.loadHouse();
 await tick();
 has('a relay that is up but a hub that is not says which', text('house-chips'), 'not answering');
-has('and home says the same thing in a sentence', houseViews.houseExplainer(), 'did not answer it');
+has('and the same thing in a sentence', houseViews.houseExplainer(), 'did not answer it');
 
 // ── a relay on the hub, which is the point of all this ──────────────
 // The whole reason for more than one relay row: the house has to be
@@ -1313,7 +1364,8 @@ if (dlg.open) { el('confirm-yes').click(); }
 await tick();
 ok('clearing a chat deletes its jobs',
   fake.deletes.some((d) => d.table === 'jobs' && d.where[1] === 'beta'));
-ok('clearing a chat returns home', window.location.hash === '#/' || window.location.hash === '');
+ok('clearing a chat returns to the front page',
+  window.location.hash === '#/' || window.location.hash === '');
 
 // ── 12. theme ─────────────────────────────────────────────────────────
 
@@ -1357,7 +1409,7 @@ window.document.activeElement.blur();
 window.location.hash = '#/';
 await tick();
 key('/');
-ok('"/" does nothing on home, where there is no composer',
+ok('"/" does nothing on the front page, where there is no composer',
   window.document.activeElement !== el('prompt'));
 key('p');
 await tick();
@@ -1366,9 +1418,10 @@ window.location.hash = '#/';
 await tick();
 
 // ── 13b. the same screens on a phone ──────────────────────────────────
-// Three things are decided in JS rather than CSS, because they are about
-// how much there is rather than how wide it is: home's reference blocks,
-// which limit leads, and how much log a card shows.
+// What a phone has is less room, not less to say: the limits are all there,
+// and say when they reset, on a narrow screen as on a wide one. The one thing
+// decided in JS rather than CSS is how much log a card shows, because that is
+// about how much there is rather than how wide it is.
 
 screen.width = 390;
 window.location.hash = '#/';
@@ -1377,24 +1430,21 @@ window.dispatchEvent(new window.Event('resize'));
 await tick();
 
 ok('the bottom tabs are there', !el('tabbar').hidden);
-ok('home is on its own tab', el('tab-home').getAttribute('aria-current') === 'page');
-ok('the reference blocks are folded away', el('home-more').hidden);
-ok('and the toggle that opens them is offered', !el('home-more-toggle').hidden);
-has('which says what it would do', text('home-more-label'), 'More detail');
-el('home-more-toggle').click();
-await tick();
-ok('tapping it unfolds them', !el('home-more').hidden);
-has('and the label flips', text('home-more-label'), 'Less detail');
-ok('the strip is in there, not dropped', !el('activity-block').hidden);
+ok('there are five of them, with the one action in the middle',
+  [...el('tabbar').querySelectorAll('.tab')].map((t) => t.id).join()
+    === 'tab-agents,tab-ask,tab-new,tab-house,tab-projects');
+ok('the front page is on its own tab', el('tab-agents').getAttribute('aria-current') === 'page');
+ok('and ideas is in the menu and on the new screen, not crowding the bar',
+  !el('tabbar').querySelector('[href="#/ideas"]') && Boolean(el('ideas-link')));
 
-// The limits block leads with the window that will actually stop you.
-const phoneMeters = [...el('usage-home').querySelectorAll('.meter')];
-has('the tightest window leads on a phone',
-  el('usage-home').querySelector('.meter-name').textContent, 'all models');
-const fold = el('usage-home').querySelector('details.fold');
-ok('the rest fold behind their own count', Boolean(fold));
-has('and the fold says how many', fold?.textContent ?? '', '2 more windows');
-ok('nothing is dropped, only folded', phoneMeters.length === 3, String(phoneMeters.length));
+// Nothing is folded away: every window is there, each with its reset.
+const phoneMeters = [...el('usage-agents').querySelectorAll('.meter')];
+ok('every window is on the page, none folded behind a tap',
+  phoneMeters.length === 3 && !el('usage-agents').querySelector('details'));
+ok('and each one says when it resets, or why it cannot',
+  phoneMeters.every((m) => /Resets|Reset time|Starts with|Reset /.test(m.textContent)));
+ok('the chip says how long as well as how much', /\d+%\s*\d/.test(text('usage-pill-text')),
+  text('usage-pill-text'));
 
 // The composer and the tabs never fight over the bottom of the window.
 window.location.hash = '#/p/alpha';
@@ -1426,8 +1476,7 @@ ok('three on a screen with room for them', tail()?.children.length === 3,
 
 window.location.hash = '#/';
 await tick();
-ok('a wide window shows the reference blocks again', !el('home-more').hidden);
-ok('and keeps the tabs out of it', el('home-more-toggle').hidden);
+ok('a wide window leaves the tabs to the sidebar', el('tabbar').classList.contains('only-narrow'));
 
 // ── 14. finish notifications ──────────────────────────────────────────
 
@@ -1467,7 +1516,7 @@ await tick();
 fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'error', error: AUTH,
   created_at: new Date().toISOString() });
 await tick();
-has('home flags a signed-out desktop', el('hero-chips').textContent, 'desktop signed out');
+has('the front page flags a signed-out desktop', el('fleet-chips').textContent, 'desktop signed out');
 has('the toast says where to fix it', el('toasts').textContent, '/login');
 
 window.location.hash = '#/p/gamma';
@@ -1482,7 +1531,7 @@ fake.emit('jobs', 'UPDATE', { ...row('j4'), status: 'done', error: null,
 window.location.hash = '#/';
 await tick();
 ok('a later finished run clears the flag',
-  !el('hero-chips').textContent.includes('desktop signed out'));
+  !el('fleet-chips').textContent.includes('desktop signed out'));
 
 // ── 15. coming back to an empty account ───────────────────────────────
 
@@ -1498,16 +1547,13 @@ Object.defineProperty(window.document, 'visibilityState', { value: 'visible', co
 window.document.dispatchEvent(new window.Event('visibilitychange'));
 await tick();
 
-ok('the first-run empty state appears', !el('home-empty').hidden);
-ok('the hero figure steps aside for it', el('hero-card').hidden);
-ok('the live block is hidden with nothing to show', el('active-block').hidden);
-ok('the usage block is hidden with no readings', el('usage-block').hidden);
-ok('the glance tiles are hidden too', el('glance-block').hidden);
-ok('the activity strip is hidden with no runs', el('activity-block').hidden);
-ok('the desktop card is hidden on the first run', el('desktop-block').hidden);
-ok('the suggestions block is hidden on the first run', el('suggest-block').hidden);
+ok('the front page survives a fresh account', !el('agents-view').hidden);
+ok('with nothing running', text('fleet-value') === '0');
+ok('it says so, and offers somewhere to start',
+  !el('fleet-empty').hidden && Boolean(el('fleet-empty').querySelector('a[href="#/new"]')));
+ok('the limits block is hidden with no readings on a first run', el('usage-block').hidden);
 ok('the usage pill leaves the topbar', el('usage-pill').hidden);
-ok('starting a project is still one tap away', !el('home-new').hidden);
+ok('the runner card stays — it is what says nothing has checked in', !el('desktop-block').hidden);
 has('the sidebar says so as well', el('project-list').textContent, 'No projects yet');
 
 // With nothing to read off, the ideas view says so and still offers openers.
@@ -1590,6 +1636,119 @@ ok('an imminent reset says so', until(at(12, 12, 1), noon) === 'any moment');
 ok('a span reads as a duration', span(at(12, 10), at(12, 12, 35)) === '2h 35m',
   span(at(12, 10), at(12, 12, 35)));
 ok('a span with nothing to measure is empty', span(null, at(12, 12)) === '');
+
+// ── 16b. what a reading of your limits means ─────────────────────────
+// The reset is the part a wrong answer makes actively misleading: "resets
+// 3:00 PM" over a window that already reset is worse than saying nothing. So
+// this is checked against fixed instants, with every way a runner can have
+// stored the time and every way a reading can lack one.
+
+const usage = await import('../usage.js');
+const { untilPhrase } = await import('../util.js');
+const NOW = noon.getTime();
+const hoursFrom = (h) => new Date(NOW + h * 3600_000).toISOString();
+const reading = (type, pct, resets) => ({ window_type: type, pct, resets_at: resets });
+const one = (pct, resets, type = 'five_hour') => usage.read(reading(type, pct, resets), NOW);
+
+const instant = new Date(2026, 2, 12, 15, 0).getTime();
+ok('an ISO string is a time', usage.parseTime(new Date(instant).toISOString()) === instant);
+ok('epoch milliseconds are a time', usage.parseTime(instant) === instant);
+ok('epoch seconds are the same time', usage.parseTime(instant / 1000) === instant);
+ok('either one, as text, is too',
+  usage.parseTime(String(instant)) === instant && usage.parseTime(String(instant / 1000)) === instant);
+ok('nothing is not the epoch',
+  [null, undefined, '', 0, '0'].every((v) => usage.parseTime(v) === null));
+ok('words are not a time', usage.parseTime('soon') === null);
+
+ok('a reset ahead of us is live', one(40, hoursFrom(2)).state === 'live');
+ok('a reset behind us is stale, not live', one(40, hoursFrom(-2)).state === 'stale');
+ok('a reset at this very instant has already happened', one(40, hoursFrom(0)).state === 'stale');
+ok('nothing used and no reset has not started', one(0, null).state === 'idle');
+ok('some used and no reset is unknown', one(12, null).state === 'unknown');
+ok('the time is kept as an ISO string for the countdown to tick on',
+  one(40, instant).resetISO === new Date(instant).toISOString());
+
+const live88pct = one(88, hoursFrom(60), 'seven_day');
+ok('a live window at 88% is nearly out', live88pct.word === 'nearly out' && live88pct.tone === 'full');
+ok('at 65% it is a watch', one(65, hoursFrom(1)).word === 'watch' && one(65, hoursFrom(1)).tone === 'warn');
+ok('under 60% it is healthy', one(59, hoursFrom(1)).word === 'healthy' && one(59, hoursFrom(1)).tone === '');
+ok('at 100% it says the limit is reached', one(100, hoursFrom(1)).word === 'limit reached');
+ok('headroom is what is left', one(42, hoursFrom(1)).left === 58);
+const overUsed = one(130, hoursFrom(1));
+ok('a bar never overflows, though the number stays honest',
+  overUsed.fill === 100 && overUsed.pct === 130 && overUsed.left === 0);
+
+const old88pct = one(88, hoursFrom(-2));
+ok('a window that already reset is not nearly out, whatever it used to say',
+  old88pct.tone === '' && old88pct.word === 'reset');
+ok('and claims no headroom from a number that is old', old88pct.left === null && old88pct.fill === 0);
+const notStarted = one(0, null);
+ok('a window that has not started is not drawn as used', notStarted.fill === 0 && notStarted.word === 'not started');
+ok('and has all of it left', notStarted.left === 100);
+ok('an unknown reset still has a severity, since it may well bind you',
+  one(88, null).word === 'nearly out');
+
+const mixedRows = [
+  reading('seven_day_opus', 65, null), reading('five_hour', 42, hoursFrom(2.25)),
+  reading('seven_day', 88, hoursFrom(67)), reading('mystery_window', 10, hoursFrom(5)),
+];
+const windows = usage.readings(mixedRows, NOW);
+ok('windows come in the order they are drawn, strangers last',
+  windows.map((r) => r.type).join() === 'five_hour,seven_day,seven_day_opus,mystery_window',
+  windows.map((r) => r.type).join());
+ok('a stranger is named from its own key', windows.at(-1).label === 'Mystery window');
+ok('a row with no figure is not a reading',
+  usage.readings([reading('five_hour', null, null), reading('seven_day', 'x', null),
+    { pct: 4 }, null], NOW).length === 0);
+
+ok('the tightest is the one that will stop you first', usage.tightest(windows).type === 'seven_day');
+ok('a window that already reset is not what is in your way',
+  usage.tightest(usage.readings([reading('five_hour', 99, hoursFrom(-1)),
+    reading('seven_day', 40, hoursFrom(50))], NOW)).type === 'seven_day');
+ok('with nothing binding, nothing is tightest',
+  usage.tightest(usage.readings([reading('five_hour', 0, null), reading('seven_day', 80, hoursFrom(-3))], NOW)) === null);
+ok('between two level windows it is the one that clears first',
+  usage.tightest(usage.readings([reading('seven_day', 80, hoursFrom(50)),
+    reading('five_hour', 80, hoursFrom(2))], NOW)).type === 'five_hour');
+const idleOnly = usage.readings([reading('five_hour', 0, null), reading('seven_day', 80, hoursFrom(-3))], NOW);
+ok('the chip falls back to a window that has not started rather than going blank',
+  usage.headline(idleOnly).type === 'five_hour');
+ok('and to the one that has reset when that is all there is',
+  usage.headline(usage.readings([reading('seven_day', 80, hoursFrom(-3))], NOW)).type === 'seven_day');
+
+const chipOf = (rows) => usage.chip(usage.readings(rows, NOW), NOW);
+ok('the chip says how much and how long',
+  chipOf(mixedRows).text === '88%' && chipOf(mixedRows).sub === '2d 19h',
+  `${chipOf(mixedRows).text} ${chipOf(mixedRows).sub}`);
+ok('an unknown reset has a figure and no countdown',
+  chipOf([reading('seven_day_opus', 65, null)]).text === '65%' && chipOf([reading('seven_day_opus', 65, null)]).sub === '');
+ok('a window that has reset says so, not a number',
+  chipOf([reading('seven_day', 88, hoursFrom(-3))]).text === 'reset');
+ok('an imminent reset says it is resetting',
+  chipOf([reading('five_hour', 90, new Date(NOW + 30_000).toISOString())]).sub === 'resetting');
+ok('the ring fills to the figure', chipOf(mixedRows).fill === 88);
+ok('no readings, no chip', usage.chip([], NOW) === null);
+
+const said = (rows) => usage.sentence(usage.readings(rows, NOW), NOW);
+has('the sentence names the window that will stop you', said(mixedRows), 'Weekly · all models');
+has('and what is left of it', said(mixedRows), '12% left');
+has('and when it resets', said(mixedRows), 'It resets');
+has('and how long that is', said(mixedRows), 'in 2d 19h');
+has('a window at its limit says so', said([reading('five_hour', 100, hoursFrom(1.5))]), 'is at its limit');
+has('and still says when it is over', said([reading('five_hour', 100, hoursFrom(1.5))]), 'in 1h 30m');
+has('one that has not started says when it will',
+  said([reading('five_hour', 0, null)]), 'opens with your next message');
+has('and that nothing is counting against you', said([reading('five_hour', 0, null)]), 'Nothing is counting against you');
+has('one read before its reset says the number is old',
+  said([reading('five_hour', 88, hoursFrom(-2))]), 'older than that');
+has('and how long ago it reset', said([reading('five_hour', 88, hoursFrom(-2))]), '2h ago');
+has('an unknown reset says the runner did not say', said([reading('seven_day', 65, null)]), 'did not say');
+ok('nothing to read says where readings come from', usage.sentence([]).startsWith('No usage readings'));
+
+ok('a countdown ends a sentence', untilPhrase(at(14, 16), noon) === 'in 2d 4h');
+ok('"in any moment" is never printed',
+  untilPhrase(new Date(NOW + 30_000).toISOString(), noon.getTime()) === 'any moment now');
+ok('nothing to count down to is nothing', untilPhrase(null) === '');
 
 // ── 17. the suggestion engine ─────────────────────────────────────────
 

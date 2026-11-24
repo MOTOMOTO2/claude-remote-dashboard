@@ -1,7 +1,7 @@
 // Chrome that isn't the data: theme, drawer, toasts, confirm dialog, the
 // one-second ticker that keeps relative times honest.
 
-import { $, esc, ago, since, elapsed, until } from './util.js';
+import { $, esc, ago, since, elapsed, until, untilPhrase } from './util.js';
 
 // ── icons ─────────────────────────────────────────────────────────────
 /** Reference into the sprite in index.html. */
@@ -93,6 +93,50 @@ export function trapFocus(e) {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
+// ── sheets ────────────────────────────────────────────────────────────
+// A dialog that comes up from the bottom of a phone and sits in the middle of
+// a desktop. A native <dialog>, so the page behind it goes inert, focus stays
+// inside and Escape works; an engine without `showModal` — which is what the
+// test window is — gets the `open` attribute instead, and the same close paths.
+
+const sheetFocus = new Map();
+
+export const sheetOpen = (id) => Boolean($(id)?.open);
+
+export function openSheet(id) {
+  const dlg = $(id);
+  if (!dlg || dlg.open) return;
+  sheetFocus.set(id, document.activeElement);
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
+}
+
+function restoreFocus(id) {
+  const back = sheetFocus.get(id);
+  sheetFocus.delete(id);
+  if (back?.isConnected) back.focus({ preventScroll: true });
+}
+
+export function closeSheet(id) {
+  const dlg = $(id);
+  if (!dlg?.open) return;
+  if (typeof dlg.close === 'function') dlg.close();
+  else dlg.removeAttribute('open');
+  restoreFocus(id);
+}
+
+/**
+ * Close on a tap on the dimmed page behind it, as a tap outside does
+ * everywhere else. The sheet's content fills the dialog, so a click that
+ * lands on the dialog itself can only have landed on its backdrop.
+ */
+export function initSheet(id) {
+  const dlg = $(id);
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) closeSheet(id); });
+  // Escape, or a platform back gesture, closes a modal without asking us.
+  dlg.addEventListener('close', () => restoreFocus(id));
+}
+
 // ── toasts ────────────────────────────────────────────────────────────
 
 export function toast(message, { bad = false, glyph = bad ? 'offline' : 'check', ms = 2800 } = {}) {
@@ -158,8 +202,8 @@ export function ask({ title, body = '', confirm = 'Confirm', danger = false }) {
 
 /**
  * One interval for the whole page. Any element carrying `data-elapsed`,
- * `data-ago` or `data-until` gets its text refreshed, so nothing has to
- * re-render just to move a clock forward.
+ * `data-ago`, `data-until` or `data-until-phrase` gets its text refreshed, so
+ * nothing has to re-render just to move a clock forward.
  */
 export function startTicker() {
   const beat = () => {
@@ -171,6 +215,9 @@ export function startTicker() {
     }
     for (const el of document.querySelectorAll('[data-until]')) {
       el.textContent = until(el.dataset.until);
+    }
+    for (const el of document.querySelectorAll('[data-until-phrase]')) {
+      el.textContent = untilPhrase(el.dataset.untilPhrase);
     }
     for (const el of document.querySelectorAll('[data-since]')) {
       el.textContent = since(el.dataset.since);

@@ -1,5 +1,5 @@
-// Hash routing. Nine places to be:
-//   #/            home
+// Hash routing. Eight places to be:
+//   #/            the front page: the same as #/agents
 //   #/p/<slug>    one project's chat
 //   #/j/<id>      a brand-new job, until the host names its project
 //   #/new         start a project
@@ -11,7 +11,7 @@
 //   #/ideas       everything worth building next, read off your own work
 
 /** Mutated in place so importers always see the current route. */
-export const route = { view: 'home', slug: null, jobId: null, chatId: null };
+export const route = { view: 'agents', slug: null, jobId: null, chatId: null };
 
 const at = (view, rest = {}) => ({ view, slug: null, jobId: null, chatId: null, ...rest });
 
@@ -24,9 +24,10 @@ export function readHash() {
   if (h === 'house') return at('house');
   if (h === 'new') return at('new');
   if (h === 'ideas') return at('ideas');
-  if (h === 'agents') return at('agents');
   if (h === 'projects') return at('projects');
-  return at('home');
+  // `#/`, `#/agents`, and anything this app no longer has a page for — an old
+  // bookmark to the home screen, say — all land on what is happening now.
+  return at('agents');
 }
 
 export function syncRoute() {
