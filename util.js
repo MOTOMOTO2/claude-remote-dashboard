@@ -150,13 +150,6 @@ export function span(from, to) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-/** Calendar day key in local time, for grouping by day. */
-export const dayKey = (iso) => {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${
-    String(d.getDate()).padStart(2, '0')}`;
-};
-
 // ── text ──────────────────────────────────────────────────────────────
 
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

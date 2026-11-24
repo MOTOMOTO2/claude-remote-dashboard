@@ -18,7 +18,7 @@ import {
   nudged, commandLabel, litLights, isQueued, RELAY_HOSTS,
 } from './house.js';
 import {
-  state, isActive, jobList, newest, oldest, threadOf, latestOf,
+  state, isActive, jobList, newest, threadOf, latestOf,
   projectOf, projectGone, eventsOf, lastActivity, resultOf, fleetNow,
   askChats, askPresence, askPending,
   houseDevices, houseRoomList, houseSummaryNow, housePresence, houseState,

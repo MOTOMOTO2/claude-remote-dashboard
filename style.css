@@ -212,7 +212,6 @@ svg {
 .muted  { color: var(--muted); }
 .small  { font-size: 13px; }
 .grow   { flex: 1; }
-.mono   { font-family: var(--mono); }
 
 ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 
@@ -270,7 +269,6 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .btn.danger:hover { background: color-mix(in srgb, var(--critical) 86%, #000); }
 
 .btn.block { width: 100%; }
-.btn.tall { padding: .7rem; }
 
 /* The small ones are what sit under a message — copy, log, run again — so
    they are quiet pills, ghost or not. */
@@ -1236,8 +1234,6 @@ a.row:hover { background: var(--surface-2); }
 .msg-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin-top: .85rem; }
 .msg-actions:empty { display: none; }
 
-.chat-foot { display: grid; justify-items: center; gap: .5rem; padding: .5rem 0 0; }
-
 /* ── new project, projects, ideas: where a page starts ──────────────── */
 /* Left-aligned, no icon: the topbar already says where you are, so the
    heading only has to say what the page is for. */
@@ -1500,16 +1496,6 @@ a.proj-live:hover span { text-decoration: underline; }
   font-size: 12.5px; white-space: nowrap;
 }
 .offline-bar svg { width: 14px; height: 14px; }
-
-/* ── skeletons ──────────────────────────────────────────────────────── */
-.skel {
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
-  background-size: 400% 100%;
-  border-radius: var(--r-sm);
-  animation: shimmer 1.4s ease-in-out infinite;
-}
-@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-.skel-row { height: 3.1rem; }
 
 /* ── the facts a run was queued with ────────────────────────────────── */
 /* Plain words with dots between, not a row of chips: they are context, and
