@@ -8,7 +8,10 @@
 // one with `vercel env add` after you say yes. Values never go anywhere but
 // Vercel, and nothing is stored on this machine.
 //
-// Run it again any time: it only asks about what is still missing.
+// Run it again any time: it only asks about what is still missing. To
+// replace settings that are there but wrong, name them:
+//
+//   npm run cloud:setup -- SUPABASE_SERVICE_KEY OWNER_ID
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -61,6 +64,15 @@ if (listing.status !== 0) {
 }
 const have = new Set([...listing.stdout.matchAll(/^\s*([A-Z][A-Z0-9_]+)\s/gm)].map((m) => m[1]));
 
+// Settings named on the command line are asked again, and replaced.
+const redo = new Set(process.argv.slice(2).map((a) => a.toUpperCase()));
+for (const name of redo) {
+  if (!have.has(name)) continue;
+  const gone = vercel(['env', 'rm', name, 'production', '--yes']);
+  if (gone.status === 0) { have.delete(name); say(`  ${dim(`removed the old ${name}`)}`); }
+  else say(`  ✗ could not remove ${name}: ${gone.stderr.trim().split('\n').at(-1)}`);
+}
+
 const cfgText = readFileSync(new URL('../config.js', import.meta.url), 'utf8');
 const supabaseUrl = cfgText.match(/supabaseUrl:\s*'([^']+)'/)?.[1] ?? '';
 const ref = supabaseUrl.match(/https:\/\/([a-z0-9-]+)\.supabase\./)?.[1] ?? '';
@@ -95,11 +107,27 @@ await want('SUPABASE_URL', async () => {
   return supabaseUrl && (await yes('  Use it?')) ? supabaseUrl : ask('  Your Supabase URL: ');
 });
 
+/** Does Supabase accept this as the secret key? Returns why not, or ''. */
+async function badServiceKey(key) {
+  const res = await fetch(`${supabaseUrl}/rest/v1/jobs?select=id&limit=1`, {
+    headers: { apikey: key, authorization: `Bearer ${key}` },
+  }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
+  if (res.ok) return '';
+  const text = await res.text().catch(() => '');
+  return `${res.status} ${text.slice(0, 120)}`;
+}
+
 await want('SUPABASE_SERVICE_KEY', async () => {
-  say('  The secret (service_role) key: it lets the runner update jobs and write the log.');
+  say('  The secret key: it lets the runner read the queue, update jobs and write the log.');
   say(`  Find it at https://supabase.com/dashboard/project/${ref || '<project>'}/settings/api-keys`);
-  say('  (the PC runner\'s agent-host/.env has the same key, if that is easier).');
-  return askHidden('  Paste it (hidden): ');
+  say(`  under ${bold('Secret keys')} — it starts with ${bold('sb_secret_')}. Click the eye to reveal it, then copy.`);
+  for (;;) {
+    const key = await askHidden('  Paste it (hidden), or press Enter to do it later: ');
+    if (!key) return '';
+    const why = await badServiceKey(key);
+    if (!why) { say('  Supabase accepts it.'); return key; }
+    say(`  Supabase rejects that key (${why}). Check you copied the whole secret key of this project.`);
+  }
 });
 
 await want('OWNER_ID', async () => {
@@ -116,7 +144,11 @@ await want('OWNER_ID', async () => {
     }
   }
   say(`  Your user id, from https://supabase.com/dashboard/project/${ref || '<project>'}/auth/users`);
-  return ask('  OWNER_ID: ');
+  for (;;) {
+    const id = await ask('  OWNER_ID: ');
+    if (!id || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return id;
+    say('  That is not a user id — it looks like 1b2c3d4e-0000-0000-0000-000000000000.');
+  }
 });
 
 await want('CLAUDE_CODE_OAUTH_TOKEN', async () => {
@@ -131,7 +163,15 @@ await want('GH_TOKEN', async () => {
   const fromGh = tryRun('gh', ['auth', 'token']);
   if (fromGh && await yes('  Use the token the GitHub CLI on this machine is signed in with?')) return fromGh;
   say('  Otherwise make one at https://github.com/settings/tokens (classic, "repo" scope).');
-  return askHidden('  Paste it (hidden): ');
+  for (;;) {
+    const token = await askHidden('  Paste it (hidden), or press Enter to do it later: ');
+    if (!token) return '';
+    const res = await fetch('https://api.github.com/user', {
+      headers: { authorization: `Bearer ${token}`, 'user-agent': 'claude-remote-setup' },
+    }).catch(() => null);
+    if (res?.ok) return token;
+    say(`  GitHub rejects that token (${res?.status ?? 'no answer'}).`);
+  }
 });
 
 await want('GITHUB_OWNER', async () => {
@@ -163,4 +203,5 @@ if (later.length) {
   say('  Everything is set.');
 }
 say(`  Settings take effect on the next deployment: push to main, or run ${bold('npx vercel --prod')}.`);
-say(`  Then open the dashboard — the topbar says ${bold('cloud · asleep')} when the runner is ready.\n`);
+say(`  Then open the dashboard — the topbar says ${bold('cloud · asleep')} when the runner is ready.`);
+say(`  To check the keys themselves once it is deployed, open /api/runner?check=1 on your site.\n`);

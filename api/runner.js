@@ -10,6 +10,7 @@
 //                             have queued a job: start whatever is waiting
 //   GET  ?action=cron         Vercel's daily cron, with CRON_SECRET
 //   GET                       whether this deployment is set up, and with what
+//   GET ?check=1              and whether Supabase and GitHub accept the keys
 //
 // It holds no state of its own. Supabase is the queue, exactly as it is for
 // the PC runner; this only decides what to start and starts it, then
@@ -152,8 +153,45 @@ function recheck(t, did) {
     .catch((e) => console.log('[dispatch] recheck', e.message)));
 }
 
+/**
+ * Whether the keys that are set actually work. A key that is present but
+ * wrong looks exactly like a working one until the first job, so this asks
+ * Supabase and GitHub. Says what is wrong, never what the value is.
+ */
+async function problems() {
+  const out = [];
+  const url = env.SUPABASE_URL.replace(/\/+$/, '');
+  const key = env.SUPABASE_SERVICE_KEY;
+  const said = async (res) => {
+    const text = await res.text().catch(() => '');
+    try { return JSON.parse(text).message ?? text.slice(0, 120); } catch { return text.slice(0, 120); }
+  };
+  const db = await fetch(`${url}/rest/v1/jobs?select=id&limit=1`, {
+    headers: { apikey: key, authorization: `Bearer ${key}` },
+  }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }));
+  if (!db.ok) {
+    out.push(`Supabase rejects SUPABASE_SERVICE_KEY (${db.status}: ${await said(db)}). `
+      + 'Use the secret key (sb_secret_…) from Settings → API keys.');
+  } else {
+    const user = await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(env.OWNER_ID)}`, {
+      headers: { apikey: key, authorization: `Bearer ${key}` },
+    }).catch(() => null);
+    if (!user?.ok) out.push(`OWNER_ID is not a user of this Supabase project (${user?.status ?? 'no answer'}).`);
+  }
+  const gh = await fetch('https://api.github.com/user', {
+    headers: { authorization: `Bearer ${env.GH_TOKEN}`, 'user-agent': 'claude-remote-runner' },
+  }).catch(() => null);
+  if (!gh?.ok) out.push(`GitHub rejects GH_TOKEN (${gh?.status ?? 'no answer'}).`);
+  const claude = env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (claude && !claude.startsWith('sk-ant-')) {
+    out.push('CLAUDE_CODE_OAUTH_TOKEN does not look like a token from `claude setup-token` (sk-ant-…).');
+  }
+  return out;
+}
+
 export async function GET(request) {
-  const action = new URL(request.url).searchParams.get('action');
+  const params = new URL(request.url).searchParams;
+  const action = params.get('action');
   const gaps = missing();
   if (action === 'cron') {
     if (!env.CRON_SECRET || !same(bearer(request), env.CRON_SECRET)) return json({ ok: false }, 401);
@@ -163,6 +201,10 @@ export async function GET(request) {
     return json({ ok: true, ...did });
   }
   // Names only, never values: enough to tell you what is left to set.
+  if (params.has('check') && !gaps.length) {
+    const wrong = await problems();
+    return json({ ok: !wrong.length, configured: true, missing: [], problems: wrong });
+  }
   return json({ ok: gaps.length === 0, configured: gaps.length === 0, missing: gaps });
 }
 
