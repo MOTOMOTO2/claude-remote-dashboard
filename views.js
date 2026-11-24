@@ -933,7 +933,7 @@ function presenceWord(who) {
   return `last seen ${ago(who.lastSeen)} ago`;
 }
 
-/** The same thing in a sentence — the toast, and the card on home. */
+/** The same thing in a sentence — what the toast says. */
 export function askExplainer() {
   const who = askPresence();
   if (!state.askReady) {
@@ -1175,7 +1175,7 @@ const deviceStatus = (device, pending) => {
   return isOn(device) ? 'done' : 'queued';
 };
 
-/** The same thing in a sentence — the toast, and the card on home. */
+/** The same thing in a sentence — what the toast says. */
 export function houseExplainer() {
   if (!state.houseReady) {
     return 'The house tables are not in your Supabase project yet. Run bridge/schema.sql, '
