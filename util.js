@@ -103,20 +103,27 @@ export function dayClock(iso, now = Date.now()) {
   return `${date}, ${t}`;
 }
 
-/** How long until something: "2d 4h" · "3h 10m" · "6m" · "any moment". */
+/**
+ * How long until something: "2d 4h" · "3h 10m" · "6m" · "any moment". Rounded
+ * once, in minutes, and carried — rounding each unit on its own printed
+ * "60m" for 59 minutes and 40 seconds, and could print "1d 24h".
+ */
 export function until(iso, now = Date.now()) {
   if (!iso) return '';
   const s = Math.round((new Date(iso).getTime() - now) / 1000);
   if (!Number.isFinite(s)) return '';
   if (s <= 60) return 'any moment';
-  if (s < HOUR) return `${Math.round(s / MIN)}m`;
-  if (s < DAY) {
-    const h = Math.floor(s / HOUR);
-    const m = Math.round((s % HOUR) / MIN);
+  const minutes = Math.round(s / MIN);
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 24 * 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
     return m ? `${h}h ${m}m` : `${h}h`;
   }
-  const d = Math.floor(s / DAY);
-  const h = Math.round((s % DAY) / HOUR);
+  // From a day up, whole hours are as fine as anyone reads it.
+  const hours = Math.round(minutes / 60);
+  const d = Math.floor(hours / 24);
+  const h = hours % 24;
   return h ? `${d}d ${h}h` : `${d}d`;
 }
 

@@ -310,16 +310,18 @@ export function usageSentence() {
  */
 function freshnessHtml() {
   if (state.usageError) {
-    return `<span class="usage-read bad">${icon('offline')}couldn’t read the limits —
-      ${esc(clip(state.usageError, 80))}</span>`;
+    return `<span class="usage-read bad">${icon('offline')}<span>couldn’t read the limits —
+      ${esc(clip(state.usageError, 80))}</span></span>`;
   }
   if (!state.usageAt) return '<span class="usage-read">no reading yet</span>';
   // No trailing "ago": `ago()` already answers with "now" when it is now.
   const moved = state.usageMovedAt
     ? ` · changed <span data-ago="${esc(state.usageMovedAt)}">${ago(state.usageMovedAt)}</span>`
     : ' · unchanged so far';
-  return `<span class="usage-read">${icon('clock')}last read
-    <span data-ago="${esc(state.usageAt)}">${ago(state.usageAt)}</span>${moved}</span>`;
+  // One inline run inside the flex row: as separate text nodes, each became
+  // its own flex item and a narrow screen broke "last read now" into a column.
+  return `<span class="usage-read">${icon('clock')}<span>last read
+    <span data-ago="${esc(state.usageAt)}">${ago(state.usageAt)}</span>${moved}</span></span>`;
 }
 
 export function renderUsage() {
@@ -866,7 +868,7 @@ function desktopHtml() {
   const feed = { live: 'live', error: 'reconnecting', connecting: 'connecting' }[realtime]
     ?? realtime;
   const rows = [
-    ['Runner', host ? esc(host.name) : state.cloud ? 'cloud' : 'none has checked in'],
+    ['Name', host ? esc(host.name) : state.cloud ? 'cloud' : 'none has checked in'],
     ['State', host || state.cloud
       ? `<span class="state" data-status="${hostFresh ? 'done' : 'queued'}">
            <i class="dot${hostFresh ? ' live' : ''}"></i>${hostFresh ? 'online'

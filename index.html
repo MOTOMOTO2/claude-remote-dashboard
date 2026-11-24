@@ -262,7 +262,7 @@
             </button>
           </h2>
           <div id="fleet-list" class="fleet"></div>
-          <div id="fleet-empty" class="quiet" hidden>
+          <div id="fleet-empty" class="blank" hidden>
             <p>Nothing is being worked on.</p>
             <a class="btn tiny primary" href="#/new">
               <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
@@ -317,9 +317,13 @@
       <!-- ── house ─────────────────────────────────────────── -->
       <section id="house-view" class="view" hidden>
         <div id="house-hero" class="hero-card">
-          <p class="hero-eyebrow">At home</p>
-          <p id="house-value" class="hero-figure">0</p>
-          <p id="house-label" class="hero-label">things on</p>
+          <div class="hero-main">
+            <p id="house-value" class="hero-figure">0</p>
+            <div class="hero-text">
+              <p id="house-label" class="hero-label">things on</p>
+              <p class="hero-eyebrow">At home</p>
+            </div>
+          </div>
           <div id="house-chips" class="chip-row"></div>
           <p id="house-now" class="hero-now" hidden></p>
         </div>

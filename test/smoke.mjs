@@ -1633,6 +1633,15 @@ ok('a countdown inside a day reads in hours and minutes',
 ok('a countdown inside the hour reads in minutes',
   until(at(12, 12, 40), noon) === '40m', until(at(12, 12, 40), noon));
 ok('an imminent reset says so', until(at(12, 12, 1), noon) === 'any moment');
+ok('59m40s is an hour, not "60m"', until(new Date(noon.getTime() + 3_580_000).toISOString(), noon) === '1h');
+ok('an hour and 59m40s is two hours, not "1h 60m"',
+  until(new Date(noon.getTime() + 7_180_000).toISOString(), noon) === '2h');
+ok('23h 40m stays hours and minutes',
+  until(new Date(noon.getTime() + 85_200_000).toISOString(), noon) === '23h 40m');
+ok('23h 59m40s is a day, not "23h 60m"',
+  until(new Date(noon.getTime() + 86_380_000).toISOString(), noon) === '1d');
+ok('a day and 23h 40m is two days, not "1d 24h"',
+  until(new Date(noon.getTime() + 171_600_000).toISOString(), noon) === '2d');
 ok('a span reads as a duration', span(at(12, 10), at(12, 12, 35)) === '2h 35m',
   span(at(12, 10), at(12, 12, 35)));
 ok('a span with nothing to measure is empty', span(null, at(12, 12)) === '');

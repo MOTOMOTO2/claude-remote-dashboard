@@ -41,7 +41,11 @@ const hexes = (map) => Object.fromEntries(
 );
 
 const light = hexes(block(':root {'));
-const dark = hexes(block(':root[data-theme="dark"] {'));
+// The full selector with its first declaration, because `:root[data-theme="dark"]`
+// alone also matches a one-line rule earlier in the file, and reading that
+// one lands in the wrong block — which made the two dark scopes below agree
+// with themselves instead of with each other.
+const dark = hexes(block(':root[data-theme="dark"] {\n  color-scheme: dark;'));
 const darkAuto = hexes(block(':root:not([data-theme="light"]) {\n    color-scheme: dark;'));
 
 // ── the claims ────────────────────────────────────────────────────────
@@ -61,14 +65,13 @@ const INK = {
   'critical-text': ['bg', 'surface'],
 };
 
-/** Mark → the surfaces it is drawn on. Dots, meter fills, chart bars. */
+/** Mark → the surfaces it is drawn on. Dots, meter fills, the ring. */
 const MARK = {
   good: ['bg', 'surface', 'surface-2'],
   warn: ['bg', 'surface', 'surface-2'],
   active: ['bg', 'surface', 'surface-2'],
   critical: ['bg', 'surface', 'surface-2'],
   accent: ['bg', 'surface'],
-  bar: ['bg', 'surface'],          // the day columns in the activity strip
 };
 
 const fails = [];
@@ -122,7 +125,7 @@ const saturation = (hex) => {
   return max ? (max - min) / max : 0;
 };
 for (const [mode, tokens] of [['light', light], ['dark', dark]]) {
-  for (const name of ['accent', 'accent-text', 'good', 'warn', 'warn-text', 'active', 'critical', 'bar']) {
+  for (const name of ['accent', 'accent-text', 'good', 'warn', 'warn-text', 'active', 'critical']) {
     checks++;
     const h = hue(tokens[name]);
     if (h >= 15 && h <= 45 && saturation(tokens[name]) > 0.35) {

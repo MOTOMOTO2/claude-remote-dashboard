@@ -3,7 +3,7 @@
 // the smoke test cannot see it.
 //
 //   node tools/mobile-audit.mjs            # every view at 390px
-//   node tools/mobile-audit.mjs home 360   # one view, one width
+//   node tools/mobile-audit.mjs agents 360 # one view, one width
 //
 // It renders each screen with tools/preview.mjs, re-opens the frozen file in
 // headless Chrome with a probe script appended, and reports: content clipped
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const root = new URL('..', import.meta.url);
 const dir = fileURLToPath(root);
 
-const VIEWS = ['home', 'agents', 'ask', 'house', 'chat', 'new', 'ideas', 'projects', 'auth'];
+const VIEWS = ['agents', 'sheet', 'ask', 'house', 'chat', 'new', 'ideas', 'projects', 'auth'];
 
 /** Any of the browsers a box with Playwright, Chrome or Edge already has. */
 function findBrowser() {
@@ -66,9 +66,17 @@ const PROBE = String.raw`
     return false;
   };
 
-  const all = [...document.querySelectorAll('body *')];
+  // With a sheet open the page behind it is inert and meant to be covered,
+  // so only what is inside the sheet is measured — and the sheet itself is
+  // what has to fit in the viewport.
+  const modal = document.querySelector('dialog[open]');
+  const all = [...(modal ?? document.body).querySelectorAll('*')];
+  if (modal) all.unshift(modal);
   for (const el of all) {
     if (el.hidden || el.closest('[hidden]')) continue;
+    // Text that is there for a screen reader and drawn for no one (a 1px,
+    // clipped heading) is not content that has been cut off.
+    if (getComputedStyle(el).clipPath !== 'none' && el.getBoundingClientRect().width <= 1) continue;
     // A closed <details> keeps its contents in the layout tree with stale
     // boxes, which read as overlapping things they are nowhere near.
     if (el.closest('details:not([open])') && !el.closest('summary')) continue;

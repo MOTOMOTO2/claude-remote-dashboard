@@ -2,21 +2,25 @@
 // screenshot) without a Supabase project. It boots the real app in jsdom
 // against the test fixtures, then freezes the DOM.
 //
-//   node --import ./test/register.mjs tools/preview.mjs home dark
+//   node --import ./test/register.mjs tools/preview.mjs agents dark
 //
 // Writes preview/<view>-<theme>.html.
-// Views: home · agents · ask · house · chat · new · ideas · projects · auth · empty.
+// Views: agents · sheet · ask · house · chat · new · ideas · projects · auth ·
+// empty · setup. `sheet` is the front page with the usage sheet open.
+// Themes: light · dark · mobile · mobile-dark.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fake } from '../test/fake-supabase.mjs';
 import { seed, makeWindow, tick, root, iso } from '../test/harness.mjs';
 
-const [view = 'home', theme = 'light'] = process.argv.slice(2);
+const [view = 'agents', theme = 'light'] = process.argv.slice(2);
 const HASH = {
-  home: '#/', agents: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
+  agents: '#/agents', sheet: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
   ideas: '#/ideas', projects: '#/projects', house: '#/house',
   auth: '#/', empty: '#/', setup: '#/ask',
 };
+const mobile = theme.startsWith('mobile');
+const dark = theme === 'dark' || theme.endsWith('-dark');
 if (!(view in HASH)) {
   console.error(`unknown view "${view}" — pick one of ${Object.keys(HASH).join(', ')}`);
   process.exit(1);
@@ -42,8 +46,8 @@ if (view === 'ask') {
       text: 'Leave the bridge running on this PC. It talks outward to Supabase, so' },
   );
 }
-const { dom, window } = makeWindow({ width: theme === 'mobile' ? 420 : 1200, dark: theme === 'dark' });
-window.localStorage.setItem('cr-theme', theme === 'dark' ? 'dark' : 'light');
+const { dom, window } = makeWindow({ width: mobile ? 420 : 1200, dark });
+window.localStorage.setItem('cr-theme', dark ? 'dark' : 'light');
 window.location.hash = HASH[view];
 
 await import('../app.js');
@@ -55,6 +59,10 @@ if (view !== 'auth') {
   window.location.hash = HASH[view];
   await tick();
   if (view === 'new') window.document.getElementById('opts').hidden = false;
+  if (view === 'sheet') {
+    window.document.getElementById('usage-pill').click();
+    await tick();
+  }
 }
 
 const frozen = dom.serialize()
