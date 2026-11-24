@@ -435,17 +435,20 @@ function askSentence() {
  * whether a slot is free, and what it is behind if not.
  */
 function queuedSentence(slug, id) {
-  if (!store.state.hostFresh && store.state.cloud) return 'Queued — starting in the cloud';
-  if (!store.state.hostFresh) return 'Queued — waiting for your desktop';
   const f = store.fleetNow();
   // The job we just sent is already in the store, so it is not one of the
-  // things it could be waiting for.
+  // things it could be waiting for. What blocks it is checked first: a
+  // runner being available means nothing if the slots or the project are
+  // taken.
   const others = f.active.filter((j) => j.id !== id);
-  if (slug && others.some((j) => j.project_slug === slug && j.status !== 'queued')) {
-    return `Queued behind the agent already on ${slug}`;
+  const ahead = slug && others.find((j) => j.project_slug === slug && j.status !== 'queued');
+  if (ahead) {
+    return `Queued behind the agent already on ${slug}${ahead.claimed_by ? ` (${ahead.claimed_by})` : ''}`;
   }
-  if (f.free > 0) return `Queued — starting now (${f.used + 1} of ${f.max} slots)`;
-  return `Queued — starts when a slot frees up (${f.used} of ${f.max} busy)`;
+  if (f.free <= 0) return `Queued — starts when a slot frees up (${f.used} of ${f.max} busy)`;
+  if (!store.state.hostFresh && store.state.cloud) return 'Queued — starting in the cloud';
+  if (!store.state.hostFresh) return 'Queued — waiting for your desktop';
+  return `Queued — starting now (${f.used + 1} of ${f.max} slots)`;
 }
 
 // delegated row actions
