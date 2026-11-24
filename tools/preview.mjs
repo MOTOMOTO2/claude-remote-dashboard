@@ -6,9 +6,10 @@
 //
 // Writes preview/<view>-<theme>.html.
 // Views: agents · sheet · limits · ask · house · chat · new · ideas · projects ·
-// auth · empty · setup. `sheet` is the front page with the usage sheet open;
-// `limits` is the three readings that have no reset time ahead of them — one
-// not started, one already reset, one that was never reported.
+// field · site · outbox · auth · empty · setup. `sheet` is the front page with
+// the usage sheet open; `limits` is the three readings that have no reset time
+// ahead of them — one not started, one already reset, one that was never
+// reported. `site` and `outbox` have something kept on the phone, unsent.
 // Themes: light · dark · mobile · mobile-dark.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -19,6 +20,7 @@ const [view = 'agents', theme = 'light'] = process.argv.slice(2);
 const HASH = {
   agents: '#/agents', sheet: '#/agents', limits: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
   ideas: '#/ideas', projects: '#/projects', house: '#/house',
+  field: '#/field', site: '#/field/site-a', outbox: '#/outbox',
   auth: '#/', empty: '#/', setup: '#/ask',
 };
 const mobile = theme.startsWith('mobile');
@@ -71,6 +73,22 @@ if (view !== 'auth') {
   if (view === 'new') window.document.getElementById('opts').hidden = false;
   if (view === 'sheet') {
     window.document.getElementById('usage-pill').click();
+    await tick();
+  }
+  // The outbox and a site are worth looking at with something on the phone
+  // that has not gone yet — which takes no signal to arrange.
+  if (view === 'outbox' || view === 'site') {
+    const store = await import('../store.js');
+    fake.offline = true;
+    store.state.sync.online = false;
+    await store.fileReport({ siteId: 'site-a', status: 'ok', note: 'Screen cleared, flow normal.', author: 'A. Tester' });
+    if (view === 'outbox') {
+      await store.createJob({ prompt: 'make the snake faster on level 3', slug: 'alpha', effort: 'high', cap: '90' });
+      await store.askAssistant({ chatId: 'c1', text: 'remind me what the weir needs' });
+    }
+    window.location.hash = '#/';
+    await tick();
+    window.location.hash = HASH[view];
     await tick();
   }
 }

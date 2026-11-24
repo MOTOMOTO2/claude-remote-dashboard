@@ -7,8 +7,9 @@ import {
 } from './util.js';
 import { readings, tightest, chip, sentence, resetWords, spanWords } from './usage.js';
 import { md } from './md.js';
-import { icon, setBadge, isNarrow } from './ui.js';
-import { route, projectHref, askHref } from './router.js';
+import { icon, setBadge, isNarrow, setOffline } from './ui.js';
+import { route, projectHref, askHref, siteHref } from './router.js';
+import { STATUS_WORD, STATUS_TONE, FILTERS as FIELD_FILTERS, filtered, dialable } from './field.js';
 import { suggest } from './suggest.js';
 import { ideas, profile, themeLabel } from './ideas.js';
 import { catalog, languages, narrow, order, tally, liveHost, webUrl } from './catalog.js';
@@ -23,6 +24,8 @@ import {
   askChats, askPresence, askPending,
   houseDevices, houseRoomList, houseSummaryNow, housePresence, houseState,
   housePending, houseBusy, houseRecent,
+  fieldSiteList, fieldTallyNow, fieldSiteOf, fieldTimelineOf,
+  unsentJobs, unsentAsks, outboxEntry, keepsAcrossReloads,
 } from './store.js';
 
 // ── bits shared by several views ──────────────────────────────────────
@@ -97,6 +100,9 @@ export function renderTopbar() {
     ask: who.known ? who.name : 'Assistant',
     ideas: 'Ideas',
     projects: 'Projects',
+    field: 'Field reports',
+    site: fieldSiteOf(route.siteId)?.name ?? 'Site',
+    outbox: 'Outbox',
   };
   $('view-title').textContent = titles[route.view] ?? '';
 
@@ -109,7 +115,8 @@ export function renderTopbar() {
       n ? plural(n, 'message') : 'no messages yet',
     ].filter(Boolean).join(' · ');
   } else if (route.view === 'pending') {
-    sub = state.cloud ? 'starting in the cloud' : 'waiting for your desktop to name it';
+    sub = outboxEntry(route.jobId) ? 'not sent yet — kept on this phone'
+      : state.cloud ? 'starting in the cloud' : 'waiting for your desktop to name it';
   } else if (route.view === 'agents') {
     const f = fleetNow();
     sub = [
@@ -127,6 +134,16 @@ export function renderTopbar() {
       presenceWord(who),
       threads ? plural(threads, 'conversation') : '',
     ].filter(Boolean).join(' · ');
+  } else if (route.view === 'field') {
+    const n = fieldTallyNow();
+    sub = n.all
+      ? [plural(n.all, 'site'), n.queued ? `${n.queued} not sent` : ''].filter(Boolean).join(' · ')
+      : state.fieldError ? 'not set up yet' : '';
+  } else if (route.view === 'site') {
+    const site = fieldSiteOf(route.siteId);
+    sub = site ? [site.asset_tag, site.region].filter(Boolean).join(' · ') : '';
+  } else if (route.view === 'outbox') {
+    sub = state.outbox.length ? `${plural(state.outbox.length, 'thing')} waiting` : 'nothing waiting';
   } else if (route.view === 'ideas') {
     sub = 'read off your own work';
   } else if (route.view === 'projects') {
@@ -230,10 +247,13 @@ export function renderSidebar() {
 
   $('project-list').innerHTML = parts.join('');
 
-  // The three doors under "New project" say which of them you are behind.
+  // The doors under "New project" say which of them you are behind. One
+  // site is still the Field section.
+  const here = route.view === 'site' ? 'field' : route.view;
   for (const [id, view] of [['ask-link', 'ask'], ['agents-link', 'agents'],
-    ['house-link', 'house'], ['projects-link', 'projects'], ['ideas-link', 'ideas']]) {
-    if (route.view === view) $(id).setAttribute('aria-current', 'page');
+    ['house-link', 'house'], ['field-link', 'field'], ['projects-link', 'projects'],
+    ['ideas-link', 'ideas'], ['outbox-link', 'outbox']]) {
+    if (here === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
   }
 }
@@ -861,8 +881,10 @@ export function renderFleetBadge() {
 export function renderTabs() {
   const doors = [['tab-agents', 'agents'], ['tab-ask', 'ask'], ['tab-new', 'new'],
     ['tab-house', 'house'], ['tab-projects', 'projects']];
+  // The front page is Agents; any other view lights no tab.
+  const here = route.view;
   for (const [id, view] of doors) {
-    if (route.view === view) $(id).setAttribute('aria-current', 'page');
+    if (here === view) $(id).setAttribute('aria-current', 'page');
     else $(id).removeAttribute('aria-current');
   }
 }
@@ -1128,13 +1150,14 @@ export function renderAsk() {
     </a>`;
   }).join('');
 
+  const waiting = current ? unsentAsks(current.id) : [];
   $('ask-thread').innerHTML = askTurns(msgs).map(({ you, reply }) => `
     <div class="turn">
       ${you ? `<div class="msg you" title="${esc(stamp(you.created_at))}">${esc(you.text)}</div>` : ''}
       ${reply ? askReplyHtml(reply, { who, queue }) : ''}
-    </div>`).join('');
+    </div>`).join('') + waiting.map(unsentTurnHtml).join('');
 
-  const blank = !msgs.length;
+  const blank = !msgs.length && !waiting.length;
   $('ask-open').hidden = !blank;
   if (blank) {
     $('ask-starters').innerHTML = STARTERS.map(starterHtml).join('');
@@ -1434,6 +1457,342 @@ export function renderHouseBadge() {
   pip.hidden = !n;
 }
 
+// ── the outbox ────────────────────────────────────────────────────────
+// What this phone still has to send. It is shown where you sent it — at the
+// end of the thread, on the site — and all together on its own screen, so
+// "did that go?" always has an answer you can see.
+
+const isoOf = (ms) => new Date(ms).toISOString();
+
+/** Where something still on this phone is, in a sentence. */
+function unsentLine(e) {
+  if (e.state === 'failed') return e.lastError ?? 'Supabase refused it.';
+  if (e.after && state.outbox.some((x) => x.id === e.after)) {
+    return 'Waits for its site to reach Supabase first.';
+  }
+  if (!state.sync.online) return 'Kept on this phone — it sends itself when there is signal.';
+  if (e.lastError) {
+    const next = until(isoOf(e.nextAttemptAt));
+    return `Not sent yet: ${e.lastError}. Trying again ${next === 'any moment' ? 'any moment' : `in ${next}`}.`;
+  }
+  return 'Sending…';
+}
+
+const KIND = {
+  job: (e) => ({ glyph: 'bot', what: e.payload.slug ? `Job for ${e.payload.slug}` : 'New project' }),
+  ask: () => ({ glyph: 'brain', what: `Message to ${askPresence().known ? askPresence().name : 'your assistant'}` }),
+  report: (e) => ({
+    glyph: 'clipboard',
+    what: `${STATUS_WORD[e.payload.status] ?? 'Report'} · ${e.payload.siteName || 'a site'}`,
+  }),
+  site: (e) => ({ glyph: 'clipboard', what: `New site · ${e.payload.name}` }),
+};
+const kindOfEntry = (e) => (KIND[e.kind] ?? (() => ({ glyph: 'outbox', what: e.kind })))(e);
+
+/** Where tapping an entry takes you: the place you sent it from. */
+const entryHref = (e) => (e.kind === 'job'
+  ? (e.payload.slug ? projectHref(e.payload.slug) : `#/j/${encodeURIComponent(e.id)}`)
+  : e.kind === 'ask' ? askHref(e.payload.chatId)
+    : e.kind === 'report' ? siteHref(e.payload.siteId)
+      : e.kind === 'site' ? siteHref(e.id) : '#/outbox');
+
+const entryText = (e) => e.payload?.prompt ?? e.payload?.text ?? e.payload?.note ?? e.title ?? '';
+
+const unsentActions = (e) => `
+  <button class="btn tiny ghost" data-outbox-retry="${esc(e.id)}">${icon('retry')}send now</button>
+  <button class="btn tiny ghost" data-outbox-discard="${esc(e.id)}">${icon('trash')}discard</button>`;
+
+/** The reply side of something not sent yet: what became of it, and what you can do. */
+function unsentHtml(e) {
+  const failed = e.state === 'failed';
+  const status = failed ? 'error' : 'queued';
+  const at = isoOf(e.createdAt);
+  return `
+    <div class="msg agent" data-status="${status}" data-unsent="${esc(e.id)}">
+      <div class="msg-head">
+        <span class="state" data-status="${status}"><i class="dot"></i>${failed ? 'refused' : 'not sent yet'}</span>
+        <span class="msg-clock">written <span data-since="${esc(at)}">${since(at)}</span></span>
+      </div>
+      <p class="note${failed ? ' bad' : ''}" data-status="${status}">${esc(unsentLine(e))}</p>
+      <div class="msg-actions">${unsentActions(e)}</div>
+    </div>`;
+}
+
+function unsentTurnHtml(e) {
+  return `
+    <div class="turn" data-unsent-turn="${esc(e.id)}">
+      <div class="msg you" title="${esc(stamp(isoOf(e.createdAt)))}">${esc(entryText(e))}</div>
+      ${unsentHtml(e)}
+    </div>`;
+}
+
+function outboxRow(e) {
+  const k = kindOfEntry(e);
+  const failed = e.state === 'failed';
+  const status = failed ? 'error' : 'queued';
+  const at = isoOf(e.createdAt);
+  return `
+    <div class="row outbox-row" data-status="${status}" data-entry="${esc(e.id)}">
+      <span class="row-top">
+        <a class="row-name" href="${esc(entryHref(e))}">${esc(k.what)}</a>
+        <span class="state" data-status="${status}"><i class="dot"></i>${failed ? 'refused' : 'waiting'}</span>
+        <span class="row-when" data-ago="${esc(at)}" title="${esc(stamp(at))}">${ago(at)}</span>
+      </span>
+      ${entryText(e) ? `<span class="row-sub">${esc(clip(entryText(e), 160))}</span>` : ''}
+      <span class="row-meta${failed ? ' bad' : ''}">${esc(unsentLine(e))}${
+        e.attempts ? ` · ${plural(e.attempts, 'try', 'tries')}` : ''}</span>
+      <span class="row-acts">${unsentActions(e)}</span>
+    </div>`;
+}
+
+export function renderOutbox() {
+  const list = state.outbox;
+  const failed = list.filter((e) => e.state === 'failed').length;
+  const where = state.sync.online
+    ? 'Each goes as soon as Supabase answers.'
+    : 'No signal — each sends itself when you are back in range.';
+  const fragile = keepsAcrossReloads() ? ''
+    : ' This browser is not keeping them across a reload (a private window?), so leave the app open until they go.';
+  $('outbox-intro').textContent = list.length
+    ? `${plural(list.length, 'thing')} on this phone${failed ? `, ${failed} refused` : ''}. ${where}${fragile}`
+    : '';
+  $('outbox-list').innerHTML = list.map(outboxRow).join('');
+  $('outbox-empty').hidden = list.length > 0;
+  $('outbox-empty-p').textContent = state.sync.savedAt
+    ? `Everything sent from this phone has reached Supabase. Last read live ${since(isoOf(state.sync.savedAt))}.`
+    : 'Everything sent from this phone has reached Supabase.';
+  $('outbox-send').hidden = !list.length;
+  $('outbox-send').disabled = state.sync.sending;
+}
+
+/**
+ * The always-there part: the pill in the topbar while anything is waiting,
+ * the sidebar door's count, and the bar that says you are offline — and,
+ * since it can now, how old what you are looking at is.
+ */
+export function renderSync() {
+  const list = state.outbox;
+  const failed = list.filter((e) => e.state === 'failed').length;
+  $('outbox-side-count').textContent = list.length ? String(list.length) : '';
+
+  const pill = $('outbox-pill');
+  pill.hidden = !list.length;
+  pill.classList.toggle('warn', failed > 0);
+  const word = failed ? `${failed} refused` : state.sync.sending ? 'sending…' : `${list.length} to send`;
+  // On a phone the topbar has room for the number, not the sentence.
+  $('outbox-pill-text').innerHTML = failed
+    ? `<b>${failed}</b><span class="pill-sub"> refused</span>`
+    : `<b>${list.length}</b><span class="pill-sub"> ${state.sync.sending ? 'sending' : 'to send'}</span>`;
+  pill.setAttribute('aria-label', `Outbox: ${word}`);
+  pill.title = failed ? 'Supabase refused something — open the outbox'
+    : `${plural(list.length, 'thing')} kept on this phone until Supabase has it`;
+
+  setOffline(!state.sync.online);
+  const at = state.sync.savedAt ? isoOf(state.sync.savedAt) : null;
+  $('offline-text').innerHTML = [
+    'Offline',
+    at ? `last read <span data-since="${esc(at)}">${since(at)}</span>` : 'nothing saved here yet',
+    list.length ? `${list.length} waiting to send` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+// ── field reports ─────────────────────────────────────────────────────
+// Field Reports, moved in. Built for the place with no signal: the list and
+// every site read from this phone, and filing a report never waits for the
+// network. A finding is a dot plus a word in the ramp the app already uses.
+
+let fieldFilter = 'all';
+export const setFieldFilter = (key) => { fieldFilter = key; };
+
+const findingTag = (status) => `
+  <span class="state" data-status="${esc(STATUS_TONE[status] ?? 'queued')}">
+    <i class="dot"></i>${esc(STATUS_WORD[status] ?? status)}</span>`;
+
+const unsentTag = (e, word = 'not sent') => `
+  <span class="tag" data-status="${e.state === 'failed' ? 'error' : 'queued'}"><i class="dot"></i>${
+    e.state === 'failed' ? 'refused' : esc(word)}</span>`;
+
+function fieldSetupHtml() {
+  const editor = sqlEditorUrl();
+  return `
+    <p class="setup-step"><span class="setup-n">1</span>Add the tables to Supabase</p>
+    <div class="info-row"><span class="info-k">Tables</span>
+      <span class="info-v"><span class="state" data-status="error"><i class="dot"></i>missing</span></span></div>
+    <div class="info-row"><span class="info-k">What to run</span>
+      <span class="info-v"><code>bridge/schema.sql</code></span></div>
+    <p class="info-note">The same one paste as the assistant and the house, and safe to run
+      again: it adds your sites and their reports, each locked to your own account, and
+      the rule that gives a site the status of its newest report.${
+        state.fieldError ? ` The read said: ${esc(state.fieldError)}` : ''}</p>
+    <div class="setup-acts">
+      <button class="btn tiny" data-copy-schema>${icon('copy')}copy the SQL</button>
+      ${editor ? `<a class="btn tiny ghost" href="${esc(editor)}" target="_blank"
+         rel="noopener">${icon('link')}open the SQL editor</a>` : ''}
+      <button class="btn tiny ghost" data-field-recheck>${icon('retry')}check again</button>
+    </div>`;
+}
+
+function siteRow(site) {
+  const at = site.lastAt ? isoOf(site.lastAt) : null;
+  const facts = [site.asset_tag, site.region].filter(Boolean).map(esc).join(' · ');
+  return `
+    <a class="row site-row" data-status="${esc(STATUS_TONE[site.status] ?? 'queued')}"
+       href="${esc(siteHref(site.id))}">
+      <span class="row-top">
+        <span class="tag">P${site.priority}</span>
+        <span class="row-name">${esc(site.name)}</span>
+        ${findingTag(site.status)}
+      </span>
+      ${site.address ? `<span class="row-sub">${esc(site.address)}</span>` : ''}
+      <span class="row-meta">
+        ${facts ? `<span>${facts}</span>` : ''}
+        <span>${at ? `last report <span data-since="${esc(at)}">${since(at)}</span>` : 'never reported'}</span>
+        ${site.queued.length ? unsentTag(site.queued.at(-1), `${site.queued.length} not sent`) : ''}
+        ${site.unsent ? unsentTag(site.unsent, 'site not sent') : ''}
+      </span>
+    </a>`;
+}
+
+export function renderField() {
+  const list = fieldSiteList();
+  const n = fieldTallyNow();
+  // Missing tables are only claimed once a read has said so: no signal, or
+  // not asked yet, is not the same thing.
+  const missing = !state.fieldReady && Boolean(state.fieldError) && !list.length;
+  const unread = !state.fieldReady && !state.fieldError && !list.length;
+
+  $('field-setup').hidden = !missing;
+  if (missing) $('field-setup').innerHTML = fieldSetupHtml();
+
+  $('field-hero').hidden = !list.length;
+  $('field-value').textContent = String(n.attention);
+  $('field-label').textContent = n.attention === 1 ? 'site needs attention' : 'sites need attention';
+  const chips = [
+    ['blocked', 'error'], ['needs_work', 'paused'], ['unvisited', 'queued'], ['ok', 'done'],
+  ].filter(([key]) => n[key]).map(([key, tone]) => `
+    <span class="stat-chip" data-status="${tone}"><i class="dot"></i><b>${n[key]}</b> ${
+      esc(STATUS_WORD[key].toLowerCase())}</span>`);
+  if (n.queued) {
+    chips.push(`<span class="stat-chip">${icon('outbox')}<b>${n.queued}</b> not sent</span>`);
+  }
+  $('field-chips').innerHTML = chips.join('');
+
+  // A filter whose last site just moved out of it is dropped, not obeyed.
+  if (fieldFilter !== 'all' && !n[fieldFilter]) fieldFilter = 'all';
+  $('field-filters').hidden = !list.length;
+  $('field-filters').innerHTML = FIELD_FILTERS.map(([key, label]) => `
+    <button type="button" class="filter-chip${fieldFilter === key ? ' on' : ''}"
+            data-field-filter="${key}" aria-pressed="${fieldFilter === key}">
+      ${esc(label)}${key === 'all' ? '' : `<span class="count">${n[key] ?? 0}</span>`}
+    </button>`).join('');
+
+  const shown = filtered(list, fieldFilter);
+  $('field-list').innerHTML = shown.map(siteRow).join('');
+  $('field-none').hidden = !list.length || shown.length > 0;
+
+  $('field-empty').hidden = missing || list.length > 0;
+  $('field-empty-h').textContent = unread ? 'Nothing saved here yet' : 'No sites yet';
+  $('field-empty-p').textContent = unread
+    ? (state.sync.online ? 'Reading your sites…'
+      : 'This phone has not read your sites yet. Open this once with a signal and they are kept here from then on — you can still add a site now.')
+    : 'Add the places you visit: each keeps its address, who to call and how to get in, and a report filed there works with no signal at all.';
+  $('field-demo').hidden = !state.fieldReady;
+  $('field-foot').hidden = !list.length;
+}
+
+function reportRow(r) {
+  return `
+    <div class="row report-row" data-status="${esc(STATUS_TONE[r.status] ?? 'queued')}">
+      <span class="row-top">
+        ${findingTag(r.status)}
+        <span class="grow"></span>
+        <span class="row-when" title="${esc(stamp(r.recorded_at))}" data-ago="${esc(r.recorded_at)}">${ago(r.recorded_at)}</span>
+      </span>
+      ${r.note ? `<p class="report-note">${esc(r.note)}</p>` : ''}
+      <span class="row-meta"><span>${esc(r.author || 'Field tech')} · ${esc(when(r.recorded_at))}</span></span>
+    </div>`;
+}
+
+function queuedReportRow(e) {
+  const p = e.payload;
+  const failed = e.state === 'failed';
+  return `
+    <div class="row report-row" data-status="${failed ? 'error' : 'queued'}" data-unsent="${esc(e.id)}">
+      <span class="row-top">
+        ${findingTag(p.status)}
+        ${unsentTag(e)}
+        <span class="grow"></span>
+        <span class="row-when" data-since="${esc(p.recordedAt)}">${since(p.recordedAt)}</span>
+      </span>
+      ${p.note ? `<p class="report-note">${esc(p.note)}</p>` : ''}
+      <span class="row-meta${failed ? ' bad' : ''}">${esc(unsentLine(e))}</span>
+      <span class="row-acts">${unsentActions(e)}</span>
+    </div>`;
+}
+
+export function renderSite() {
+  const site = fieldSiteOf(route.siteId);
+  $('site-missing').hidden = Boolean(site);
+  for (const id of ['site-head', 'site-info', 'site-reports-block', 'site-actions']) $(id).hidden = !site;
+  if (!site) {
+    $('site-missing-p').textContent = state.sync.online && !state.fieldReady && !state.fieldError
+      ? 'Reading it now…'
+      : 'This site is not saved on this phone: it was never opened here with a signal, or it has been removed.';
+    return;
+  }
+
+  const shownChanged = site.status !== site.saved && site.queued.length;
+  $('site-head').innerHTML = `
+    <div class="chat-title">
+      <h2>${esc(site.name)}</h2>
+      <span class="meta">
+        ${findingTag(site.status)}
+        ${shownChanged ? unsentTag(site.queued.at(-1)) : ''}
+        ${site.unsent ? unsentTag(site.unsent, 'site not sent') : ''}
+        <span class="tag">P${site.priority}</span>
+      </span>
+    </div>
+    <span class="chat-stats">${esc([site.asset_tag, site.region].filter(Boolean).join(' · '))}</span>`;
+
+  const phone = dialable(site.contact_phone);
+  const rows = [
+    ['Address', site.address || '—'],
+    ['Contact', [site.contact_name, site.contact_phone].filter(Boolean).join(' · ') || '—'],
+  ];
+  const last = site.lastAt
+    ? `<span data-since="${esc(isoOf(site.lastAt))}">${since(isoOf(site.lastAt))}</span>` : 'never';
+  // Calling is the thing you do from here with gloves on, so it is a button,
+  // not a phone number you have to hit exactly.
+  const call = phone ? `
+    <div class="setup-acts">
+      <a class="btn tiny" href="tel:${esc(phone)}">${icon('phone')}call ${
+        esc(site.contact_name ? site.contact_name.split(' ')[0] : site.contact_phone)}</a>
+    </div>` : '';
+  $('site-info').innerHTML = rows.map(([k, v]) => `
+    <div class="info-row"><span class="info-k">${esc(k)}</span><span class="info-v">${esc(v)}</span></div>`).join('')
+    + `<div class="info-row"><span class="info-k">Last report</span><span class="info-v">${last}</span></div>`
+    + (site.access_notes ? `<p class="note site-access"><b>Getting in.</b> ${esc(site.access_notes)}</p>` : '')
+    + call
+    + (site.unsent ? `<p class="note${site.unsent.state === 'failed' ? ' bad' : ''}" data-status="${
+      site.unsent.state === 'failed' ? 'error' : 'queued'}">${esc(unsentLine(site.unsent))}</p>` : '');
+
+  const { queued, saved } = fieldTimelineOf(site.id);
+  const total = queued.length + saved.length;
+  $('site-count').textContent = total ? String(total) : '';
+  $('site-note').textContent = queued.length ? `${queued.length} not sent`
+    : state.sync.fromSaved || !state.sync.online ? 'saved on this phone' : '';
+  $('site-reports').innerHTML = queued.map(queuedReportRow).join('')
+    + saved.map(reportRow).join('')
+    + (total ? '' : '<p class="empty-note">No reports filed yet.</p>');
+  $('site-file').dataset.site = site.id;
+}
+
+/** Reports still to send: the number on the Field door in the menu. */
+export function renderFieldBadge() {
+  const n = state.outbox.filter((e) => e.kind === 'report' || e.kind === 'site').length;
+  $('field-count').textContent = n ? String(n) : '';
+}
+
 // ── project chat ──────────────────────────────────────────────────────
 
 const logLine = (e) => `<span class="l-${esc(e.kind)}">${esc(e.text)}</span>\n`;
@@ -1575,7 +1934,9 @@ export function renderChat() {
       ${replyHtml(job)}
     </div>`).join('');
 
-  $('thread').innerHTML = notice + (mine.length ? turns : `
+  const waiting = unsentJobs(slug).map(unsentTurnHtml).join('');
+
+  $('thread').innerHTML = notice + (mine.length || waiting ? turns + waiting : `
     <div class="empty">
       ${icon('folder', 'empty-art')}
       <h3>No messages yet</h3>
@@ -1621,6 +1982,13 @@ export function appendLive(ev, onRerender) {
 
 export function renderPending(job) {
   $('chat-head').hidden = true;
+  const unsent = job ? null : outboxEntry(route.jobId);
+  if (unsent) {
+    $('thread').innerHTML = `${unsentTurnHtml(unsent)}
+      <p class="empty-note center">It goes the moment this phone has a signal, then
+        ${state.cloud ? 'the cloud runner' : 'your desktop'} names the project and this turns into its chat.</p>`;
+    return;
+  }
   $('thread').innerHTML = job ? `
     <div class="turn">
       <div class="msg you">${esc(job.prompt)}</div>

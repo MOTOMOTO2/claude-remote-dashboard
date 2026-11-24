@@ -96,6 +96,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-house"/></svg>
           <span class="nav-name">House</span><span id="house-count" class="count"></span>
         </a>
+        <a id="field-link" class="nav-item" href="#/field">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clipboard"/></svg>
+          <span class="nav-name">Field</span><span id="field-count" class="count"></span>
+        </a>
         <a id="projects-link" class="nav-item" href="#/projects">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder"/></svg>
           <span class="nav-name">Projects</span><span id="projects-count" class="count"></span>
@@ -103,6 +107,10 @@
         <a id="ideas-link" class="nav-item" href="#/ideas">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bulb"/></svg>
           <span class="nav-name">Ideas</span><span id="ideas-count" class="count"></span>
+        </a>
+        <a id="outbox-link" class="nav-item" href="#/outbox">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-outbox"/></svg>
+          <span class="nav-name">Outbox</span><span id="outbox-side-count" class="count"></span>
         </a>
       </nav>
       <div class="search">
@@ -153,6 +161,13 @@
         <span id="view-sub" class="tb-sub"></span>
       </div>
 
+      <!-- What this phone is still waiting to send. Only there while something is. -->
+      <button id="outbox-pill" class="pill" type="button" hidden
+              aria-label="Waiting to send">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-outbox"/></svg>
+        <span id="outbox-pill-text">—</span>
+      </button>
+
       <!-- Your limits, at a glance: a ring for how much is used, and how long
            until it resets. Tapping it opens every window in a sheet. -->
       <button id="usage-pill" class="pill usage-chip" type="button" hidden
@@ -172,6 +187,12 @@
 
     <div class="stage">
     <div id="scroller" class="scroller">
+      <!-- In the flow at the top of the page, and sticky as it scrolls: it
+           says how old the screen is, and covers no control to say it. -->
+      <button id="offline-bar" class="offline-bar" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-offline"/></svg>
+        <span id="offline-text">Offline — showing the last synced state</span>
+      </button>
 
       <!-- ── project chat ──────────────────────────────────── -->
       <section id="chat-view" class="view" hidden>
@@ -367,6 +388,113 @@
            not. Everything here goes through a relay on that network — no port is open
            to the internet, and the hub's token never leaves it. Run that relay on the
            hub itself and the house is reachable whether or not your PC is awake.</p>
+      </section>
+
+      <!-- ── field reports ─────────────────────────────────── -->
+      <section id="field-view" class="view" hidden>
+        <div id="field-hero" class="hero-card">
+          <p class="hero-eyebrow">Field reports</p>
+          <p id="field-value" class="hero-figure">0</p>
+          <p id="field-label" class="hero-label">sites need attention</p>
+          <div id="field-chips" class="chip-row"></div>
+        </div>
+
+        <div id="field-setup" class="card info-card" hidden></div>
+
+        <div id="field-filters" class="filter-row" role="group" aria-label="Filter sites by status"></div>
+
+        <div id="field-list" class="stack"></div>
+
+        <p id="field-none" class="empty-note center" hidden>
+          Nothing in this filter — pick another one.
+        </p>
+
+        <div id="field-empty" class="empty" hidden>
+          <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clipboard"/></svg>
+          <h3 id="field-empty-h">No sites yet</h3>
+          <p id="field-empty-p">Add the places you visit: each keeps its address, who to
+             call and how to get in, and a report filed there works with no signal at all.</p>
+          <div class="setup-acts">
+            <button class="btn primary" type="button" data-site-add>Add a site</button>
+            <button id="field-demo" class="btn ghost" type="button" data-field-demo>Load the 14 demo sites</button>
+          </div>
+        </div>
+
+        <div id="field-foot" class="fleet-foot">
+          <button class="btn primary" type="button" data-site-add>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+            Add a site
+          </button>
+        </div>
+
+        <p class="empty-note center">Kept on this phone: the list, and every site you
+           have opened, read fine with no signal. A report filed with none waits in
+           the outbox and sends itself when you are back in range.</p>
+      </section>
+
+      <!-- ── one site ──────────────────────────────────────── -->
+      <section id="site-view" class="view" hidden>
+        <div id="site-head" class="chat-head"></div>
+        <div id="site-info" class="card info-card"></div>
+
+        <!-- Under the facts, not stuck to the bottom: visible without scrolling,
+             and nothing in the history ever sits underneath it. -->
+        <div id="site-actions" class="site-actions">
+          <a class="btn ghost" href="#/field" aria-label="All sites">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clipboard"/></svg>
+            Sites
+          </a>
+          <button id="site-file" class="btn primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>
+            File report
+          </button>
+        </div>
+
+        <section id="site-reports-block" class="block">
+          <h2 class="block-h">
+            <span>Reports</span><span id="site-count" class="count"></span>
+            <span id="site-note" class="block-note"></span>
+          </h2>
+          <div id="site-reports" class="stack"></div>
+        </section>
+
+        <div id="site-missing" class="empty" hidden>
+          <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-offline"/></svg>
+          <h3>Not on this phone</h3>
+          <p id="site-missing-p">This site was never opened here with a signal, so there is
+             no saved copy to read.</p>
+          <a class="btn ghost" href="#/field">All sites</a>
+        </div>
+
+      </section>
+
+      <!-- ── the outbox ────────────────────────────────────── -->
+      <section id="outbox-view" class="view" hidden>
+        <div class="intro">
+          <svg class="intro-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-outbox"/></svg>
+          <h2 class="intro-h">Waiting to send</h2>
+          <p id="outbox-intro" class="intro-p"></p>
+        </div>
+
+        <div id="outbox-list" class="stack"></div>
+
+        <div id="outbox-empty" class="empty" hidden>
+          <svg class="empty-art" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg>
+          <h3>Nothing waiting</h3>
+          <p id="outbox-empty-p">Everything you sent from this phone has reached Supabase.</p>
+        </div>
+
+        <div class="fleet-foot">
+          <button id="outbox-send" class="btn primary" type="button" data-outbox-flush>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-retry"/></svg>
+            Send now
+          </button>
+        </div>
+
+        <p class="empty-note center">Jobs, messages to your assistant, field reports and
+           new sites are kept here until Supabase has them, and sent again by themselves
+           when the signal comes back. House taps are not: a light that switches hours
+           after you tapped it is worse than one that didn't.</p>
       </section>
 
       <!-- ── ideas ─────────────────────────────────────────── -->
@@ -567,11 +695,6 @@
 </div>
 
 <!-- ───────────────────────────────────────────────── overlays -->
-<div id="offline-bar" class="offline-bar" hidden>
-  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-offline"/></svg>
-  Offline — showing the last synced state
-</div>
-
 <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
 <dialog id="confirm" class="dialog">
@@ -605,6 +728,95 @@
   </div>
 </dialog>
 
+<!-- Filing a report: everything in reach of a thumb, and the button says what
+     will actually happen — saved now either way, sent now or later. -->
+<dialog id="report-dialog" class="dialog sheet" aria-labelledby="report-title">
+  <form id="report-form" class="sheet-body sheet-form" novalidate>
+    <header class="sheet-head">
+      <h3 id="report-title">File a report</h3>
+      <button id="report-close" class="icon-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <p id="report-site" class="sheet-lead"></p>
+    <fieldset class="field">
+      <legend class="field-label">What did you find?</legend>
+      <div class="segmented finding" role="radiogroup" aria-label="What did you find?">
+        <label><input type="radio" name="finding" value="ok" checked><span>OK</span></label>
+        <label><input type="radio" name="finding" value="needs_work"><span>Needs work</span></label>
+        <label><input type="radio" name="finding" value="blocked"><span>Blocked</span></label>
+      </div>
+    </fieldset>
+    <label class="field">
+      <span class="field-label">Notes</span>
+      <textarea id="report-note" rows="3" maxlength="2000"
+        placeholder="What you saw, what you did, what is still outstanding."></textarea>
+    </label>
+    <label class="field">
+      <span class="field-label">Your name</span>
+      <input id="report-author" type="text" autocomplete="name" maxlength="120"
+             placeholder="Remembered for next time">
+    </label>
+    <p id="report-error" class="form-error" hidden></p>
+    <button id="report-save" class="btn primary block tall" type="submit">Save and send</button>
+    <p id="report-foot" class="sheet-foot"></p>
+  </form>
+</dialog>
+
+<dialog id="site-dialog" class="dialog sheet" aria-labelledby="site-dialog-title">
+  <form id="site-form" class="sheet-body sheet-form" novalidate>
+    <header class="sheet-head">
+      <h3 id="site-dialog-title">Add a site</h3>
+      <button id="site-close" class="icon-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <label class="field">
+      <span class="field-label">Name</span>
+      <input id="site-name" type="text" maxlength="200" autocomplete="off" required>
+    </label>
+    <label class="field">
+      <span class="field-label">Address</span>
+      <input id="site-address" type="text" maxlength="300" autocomplete="off">
+    </label>
+    <div class="field-pair">
+      <label class="field">
+        <span class="field-label">Region</span>
+        <input id="site-region" type="text" maxlength="300" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">Asset tag</span>
+        <input id="site-tag" type="text" maxlength="300" autocomplete="off">
+      </label>
+    </div>
+    <fieldset class="field">
+      <legend class="field-label">Priority</legend>
+      <div class="segmented" role="radiogroup" aria-label="Priority">
+        <label><input type="radio" name="site-priority" value="1"><span>P1 · first</span></label>
+        <label><input type="radio" name="site-priority" value="2" checked><span>P2</span></label>
+        <label><input type="radio" name="site-priority" value="3"><span>P3</span></label>
+      </div>
+    </fieldset>
+    <label class="field">
+      <span class="field-label">Getting in</span>
+      <textarea id="site-access" rows="2" maxlength="2000"
+        placeholder="Gate codes, keys, where to park"></textarea>
+    </label>
+    <div class="field-pair">
+      <label class="field">
+        <span class="field-label">Contact</span>
+        <input id="site-contact" type="text" maxlength="300" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">Their phone</span>
+        <input id="site-phone" type="tel" maxlength="300" autocomplete="off">
+      </label>
+    </div>
+    <p id="site-error" class="form-error" hidden></p>
+    <button id="site-save" class="btn primary block tall" type="submit">Add site</button>
+  </form>
+</dialog>
+
 <!-- ───────────────────────────────────────────────── icon sprite -->
 <svg class="sprite" aria-hidden="true" focusable="false">
   <defs>
@@ -627,6 +839,8 @@
     <g id="i-moon"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></g>
     <g id="i-auto"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 010 16z" fill="currentColor" stroke="none"/></g>
     <g id="i-eye"><path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></g>
+    <g id="i-clipboard"><path d="M9 4.5h6a1 1 0 011 1V7H8V5.5a1 1 0 011-1z"/><path d="M8 5.8H6.6A1.6 1.6 0 005 7.4v11.5a1.6 1.6 0 001.6 1.6h10.8a1.6 1.6 0 001.6-1.6V7.4a1.6 1.6 0 00-1.6-1.6H16"/><path d="M8.6 13.4l2.2 2.2 4.6-4.8"/></g>
+    <g id="i-outbox"><path d="M4 14l2.1-6.6A1.6 1.6 0 017.6 6.3H9M15 6.3h1.4a1.6 1.6 0 011.5 1.1L20 14v4.4a1.6 1.6 0 01-1.6 1.6H5.6A1.6 1.6 0 014 18.4z"/><path d="M4 14h4.4l1.3 2.2h4.6l1.3-2.2H20"/><path d="M12 12.2V3.8M9.4 6.4L12 3.8l2.6 2.6"/></g>
     <g id="i-offline"><path d="M3 3l18 18M8.5 16.5a5 5 0 017-7M5.2 13a9 9 0 0112.6-2.4M12 20h.01"/></g>
     <g id="i-folder"><path d="M4 7.5A1.5 1.5 0 015.5 6h3.2l1.8 2h8A1.5 1.5 0 0120 9.5v8A1.5 1.5 0 0118.5 19h-13A1.5 1.5 0 014 17.5z"/></g>
     <g id="i-check"><path d="M5 13l4.5 4.5L19 7"/></g>

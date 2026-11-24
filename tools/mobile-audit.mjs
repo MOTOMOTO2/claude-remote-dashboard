@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const root = new URL('..', import.meta.url);
 const dir = fileURLToPath(root);
 
-const VIEWS = ['agents', 'sheet', 'limits', 'ask', 'house', 'chat', 'new', 'ideas', 'projects', 'auth'];
+const VIEWS = ['agents', 'sheet', 'limits', 'ask', 'house', 'chat', 'new', 'ideas', 'projects', 'field', 'site', 'outbox', 'auth'];
 
 /** Any of the browsers a box with Playwright, Chrome or Edge already has. */
 function findBrowser() {
@@ -29,6 +29,7 @@ function findBrowser() {
     'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
     '/usr/bin/chromium',
     '/usr/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   ];
   return [process.env.CHROME, ...shells].filter(Boolean).find((p) => existsSync(p)) ?? null;
 }

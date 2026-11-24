@@ -293,7 +293,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
 
 /* ── text fields ────────────────────────────────────────────────────── */
-input[type=email], input[type=password], input[type=search], textarea {
+input[type=email], input[type=password], input[type=search],
+input[type=text], input[type=tel], textarea {
   width: 100%;
   padding: .65rem .8rem;
   background: var(--surface);
@@ -1485,9 +1486,9 @@ a.proj-live:hover span { text-decoration: underline; }
 @media (max-width: 899px) { .toasts { bottom: calc(5.4rem + env(safe-area-inset-bottom, 0px)); } }
 
 .offline-bar {
-  position: fixed; z-index: 50;
-  top: calc(env(safe-area-inset-top, 0px) + .5rem); left: 50%;
-  transform: translateX(-50%);
+  position: sticky; z-index: 5;
+  top: .5rem;
+  margin: .6rem auto -.1rem; width: fit-content;
   display: flex; align-items: center; gap: .45rem;
   padding: .4rem .8rem;
   background: var(--surface-3); color: var(--text-2);
@@ -1684,8 +1685,8 @@ a.proj-live:hover span { text-decoration: underline; }
   }
   /* A project's name is the link you actually aim at, and it is one line of
      text — so it needs more of the row than the controls do. */
-  :is(.proj-name, .agent-name, .proj-live) { position: relative; }
-  :is(.proj-name, .agent-name, .proj-live)::after {
+  :is(.proj-name, .agent-name, .proj-live, .outbox-row a.row-name) { position: relative; }
+  :is(.proj-name, .agent-name, .proj-live, .outbox-row a.row-name)::after {
     content: ''; position: absolute; inset: -9px 0;
   }
   .send-btn { width: 2.5rem; height: 2.5rem; }
@@ -1852,3 +1853,73 @@ div.dev-main { cursor: default; }
   .ring-fill { stroke: Highlight; }
   .dot { outline: 1px solid CanvasText; }
 }
+
+/* ── field reports, the outbox, and working with no signal ──────────── */
+
+/* A row's quieter facts — what it is, when, and anything still on this
+   phone — on one wrapping line under the name. */
+.row-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .2rem .55rem;
+  font-size: 11.5px; color: var(--muted);
+}
+.row-meta.bad { color: var(--critical-text); }
+.row-acts { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .3rem; }
+.row-acts .btn { color: var(--text-2); }
+a.row-name { color: inherit; text-decoration: none; }
+a.row-name:hover { text-decoration: underline; }
+
+
+/* A site wears its finding as a dot and a word; the edge picks the tone up
+   only for the two that need someone to go back. */
+.site-row[data-status="error"]  { border-color: color-mix(in srgb, var(--critical) 32%, var(--line)); }
+.site-row[data-status="paused"] { border-color: color-mix(in srgb, var(--warn) 36%, var(--line)); }
+
+.report-note {
+  margin: .25rem 0 .1rem;
+  font-size: 13.5px; line-height: 1.5;
+  white-space: pre-line; overflow-wrap: anywhere;
+}
+.site-access { margin: .35rem 0 0; }
+#site-info { margin-bottom: .9rem; }
+
+/* Filing a report is the one thing you came to this screen to do, so it
+   comes straight after the facts, before the history — on a phone that is
+   the middle of the screen, without scrolling for it. */
+.site-actions {
+  display: flex; gap: .5rem;
+  margin: 0 0 1.6rem;
+}
+.site-actions .btn.primary { flex: 1 1 auto; }
+.site-actions .btn { padding-block: .62rem; text-decoration: none; }
+
+/* The two sheets are the usage sheet's kind (.sheet, .sheet-body): up from
+   the bottom on a phone, in the middle of a desktop. Inside, a form in one
+   column — every field and its one button in reach of a thumb. */
+.sheet-form { display: grid; gap: .85rem; }
+.sheet-form .sheet-head { margin-bottom: 0; }
+.sheet-form .sheet-lead { margin: -.65rem 0 0; }
+.sheet-form fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.sheet-form legend { padding: 0; margin-bottom: .3rem; }
+.field-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .6rem; }
+.sheet-foot { margin: -.35rem 0 0; font-size: 12px; color: var(--muted); }
+.sheet-foot:empty { display: none; }
+/* A finding is picked with a thumb, so it gets a thumb-sized target, and
+   the picked one wears its tone in text — on the surface it clears 4.5:1. */
+.segmented.finding span { padding-block: .6rem; }
+.segmented.finding input[value="ok"]:checked + span         { color: var(--good-text); }
+.segmented.finding input[value="needs_work"]:checked + span { color: var(--warn-text); }
+.segmented.finding input[value="blocked"]:checked + span    { color: var(--critical-text); }
+@media (max-width: 599px) {
+  .field-pair { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The offline bar is a button now: it can say how old the screen is, and
+   takes you to what is waiting. Bounded, so it never runs off a 320px phone. */
+button.offline-bar {
+  font: inherit; font-size: 12px; cursor: pointer; border: 0;
+  max-width: calc(100% - 1.5rem); min-height: 2.5rem;
+}
+#offline-text { overflow: hidden; text-overflow: ellipsis; }
+#outbox-pill b { font-weight: 650; font-variant-numeric: tabular-nums; }
+/* On a phone the topbar has room for the number, not the sentence. */
+@media (max-width: 599px) { #outbox-pill .pill-sub { display: none; } }

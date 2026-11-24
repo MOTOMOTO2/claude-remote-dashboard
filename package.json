@@ -5,7 +5,8 @@
   "description": "Mobile-first dashboard for queueing coding jobs to Claude, on your desktop or in the cloud, and talking to your own assistant",
   "type": "module",
   "scripts": {
-    "test": "node tools/contrast.mjs && node --import ./test/register.mjs test/smoke.mjs && node test/host.mjs && node test/bridge.mjs",
+    "test": "node tools/contrast.mjs && node test/offline.mjs && node --import ./test/register.mjs test/smoke.mjs && node test/host.mjs && node test/bridge.mjs",
+    "test:offline": "node test/offline.mjs",
     "contrast": "node tools/contrast.mjs",
     "serve": "node tools/serve.mjs",
     "preview": "node --import ./test/register.mjs tools/preview.mjs",

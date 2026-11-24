@@ -145,6 +145,36 @@ export function seed() {
       action: 'temperature', value: 20.5, source: 'assistant', status: 'done', created_at: iso(5) },
   ];
 
+  // Field reports: three sites in the three states worth drawing, one of them
+  // with markup in its name and a report with markup in its note, because
+  // both are typed in by a person on a phone.
+  const day = 24 * 60;
+  fake.tables.field_sites = [
+    { id: 'site-a', owner: 'u1', name: 'Etobicoke Creek Weir', address: '100 Elmcrest Rd, Toronto',
+      region: 'Toronto West', asset_tag: 'WER-1049', priority: 1, status: 'needs_work',
+      access_notes: 'No cell signal in the culvert — log it and sync at the truck.',
+      contact_name: 'Fatima Zahra', contact_phone: '+1-416-555-0188',
+      last_report_at: iso(3 * day), updated_at: iso(60) },
+    { id: 'site-b', owner: 'u1', name: 'Port Lands <b>Telemetry</b> Hut', address: '440 Unwin Ave, Toronto',
+      region: 'Toronto East', asset_tag: 'TLM-1051', priority: 1, status: 'blocked',
+      access_notes: '', contact_name: '', contact_phone: '',
+      last_report_at: iso(day), updated_at: iso(60) },
+    { id: 'site-c', owner: 'u1', name: 'Lakeshore Pump House', address: '22 Marine Pde Dr, Toronto',
+      region: 'Toronto West', asset_tag: 'PMP-1042', priority: 3, status: 'ok',
+      access_notes: 'Key from the harbour office desk before 16:00.', contact_name: 'Nina Osei',
+      contact_phone: '+1-416-555-0192', last_report_at: iso(9 * day), updated_at: iso(60) },
+  ];
+  fake.tables.field_reports = [
+    { id: 'seed-0000001', owner: 'u1', site_id: 'site-a', status: 'needs_work', author: 'F. Zahra',
+      note: 'Debris screen 60% blocked after the storm. Cleared what I could by hand.',
+      recorded_at: iso(3 * day), received_at: iso(3 * day) },
+    { id: 'seed-0000002', owner: 'u1', site_id: 'site-b', status: 'blocked', author: 'M. Chow',
+      note: '<img src=x onerror=alert(1)> road washed out at the rail crossing',
+      recorded_at: iso(day), received_at: iso(day) },
+    { id: 'seed-0000003', owner: 'u1', site_id: 'site-c', status: 'ok', author: 'N. Osei',
+      note: 'All nominal. Replaced the logbook.', recorded_at: iso(9 * day), received_at: iso(9 * day) },
+  ];
+
   return fake;
 }
 

@@ -1,6 +1,9 @@
 # Vercel serves the app straight from the repo root. Everything below runs
 # somewhere else (the bridge on the PC or the hub) or only in development.
-bridge/
+bridge/*
+# …except the migration: the setup cards fetch it for their "copy the SQL"
+# button, and without it that button can only say it could not read it.
+!bridge/schema.sql
 test/
 tools/
 preview/

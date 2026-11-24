@@ -2,6 +2,12 @@
 // dashboard actually uses: select/order/limit/in, insert().select().single(),
 // update().eq(), upsert({ onConflict }), delete().eq(), auth, and realtime
 // channels.
+//
+// And the ways a real one goes wrong, for the outbox: no network at all
+// (`offline`), a write that lands but whose answer is lost on the way back
+// (`loseAnswer`), a unique key refusing a second copy (23505, on `id` and
+// `client_id`), and a table that hasn't had a column added yet
+// (`missingColumns`, PGRST204).
 
 export const fake = {
   session: null,
@@ -9,9 +15,16 @@ export const fake = {
     jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
     chats: [], chat_messages: [], assistants: [],
     house_devices: [], house_hubs: [], house_commands: [],
+    field_sites: [], field_reports: [],
   },
   /** table -> error, so a read can be made to fail the way a real one does. */
   failures: {},
+  /** No network: every request fails the way fetch does, and nothing is written. */
+  offline: false,
+  /** table -> true: the next write to it lands, but its answer never arrives. */
+  loseAnswer: {},
+  /** table -> [columns]: an insert naming one is refused, as PostgREST does. */
+  missingColumns: {},
   inserts: [],
   updates: [],
   upserts: [],
@@ -24,8 +37,12 @@ export const fake = {
       jobs: [], projects: [], usage_windows: [], job_events: [], hosts: [], settings: [],
     chats: [], chat_messages: [], assistants: [],
     house_devices: [], house_hubs: [], house_commands: [],
+    field_sites: [], field_reports: [],
     };
     this.failures = {};
+    this.offline = false;
+    this.loseAnswer = {};
+    this.missingColumns = {};
     this.inserts = [];
     this.updates = [];
     this.upserts = [];
@@ -60,6 +77,36 @@ export const fake = {
 
 const ok = (data) => ({ data, error: null });
 
+/** What supabase-js hands back when fetch itself throws. */
+const NO_NETWORK = {
+  data: null,
+  error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' },
+  count: null,
+  status: 0,
+  statusText: '',
+};
+
+/** Column defaults the real schema has and the generic `status: 'queued'` gets wrong. */
+const DEFAULTS = {
+  field_sites: { status: 'unvisited', last_report_at: null },
+};
+
+/**
+ * What bridge/schema.sql's two triggers do to a report: the server's own
+ * receipt time, and the site taking the status of its newest report — newest
+ * by when it was recorded, so a late one cannot overwrite a fresher one.
+ */
+function reportTrigger(report) {
+  report.received_at = new Date().toISOString();
+  report.recorded_at ??= report.received_at;
+  const site = fake.tables.field_sites.find((s) => s.id === report.site_id);
+  if (!site) return;
+  if (!site.last_report_at || Date.parse(site.last_report_at) <= Date.parse(report.recorded_at)) {
+    site.status = report.status;
+    site.last_report_at = report.recorded_at;
+  }
+}
+
 class Query {
   constructor(table) {
     this.table = table;
@@ -67,6 +114,9 @@ class Query {
     this.mode = 'select';
     this.payload = null;
     this.one = false;
+    this.error = null;
+    // Decided when the request is made, as a real one would be.
+    this.offline = fake.offline;
   }
 
   select() { return this; }
@@ -90,6 +140,7 @@ class Query {
 
   eq(col, value) {
     this.rows = this.rows.filter((r) => r[col] === value);
+    if (this.offline) return this;
     if (this.mode === 'update') {
       fake.updates.push({ table: this.table, where: [col, value], patch: this.payload });
       for (const r of fake.tables[this.table]) {
@@ -106,8 +157,34 @@ class Query {
   /** One row, or several — a room's worth of taps goes in as an array. */
   insert(rows) {
     this.mode = 'insert';
-    const list = (Array.isArray(rows) ? rows : [rows]).map((row) => {
-      const stored = { id: `new-${fake.inserts.length + 1}`, status: 'queued', ...row };
+    const given = Array.isArray(rows) ? rows : [rows];
+    if (this.offline) { this.rows = []; return this; }
+
+    // One statement: if any row is refused, none of them go in.
+    const missing = (fake.missingColumns[this.table] ?? [])
+      .find((col) => given.some((row) => col in row));
+    if (missing) {
+      this.error = { code: 'PGRST204', status: 400,
+        message: `Could not find the '${missing}' column of '${this.table}' in the schema cache` };
+      this.rows = [];
+      return this;
+    }
+    const table = (fake.tables[this.table] ??= []);
+    const clash = given.find((row) => table.some((r) =>
+      (row.id != null && r.id === row.id)
+      || (row.client_id != null && r.client_id === row.client_id)));
+    if (clash) {
+      this.error = { code: '23505', status: 409,
+        message: `duplicate key value violates unique constraint "${this.table}_pkey"` };
+      this.rows = [];
+      return this;
+    }
+
+    const list = given.map((row) => {
+      const stored = {
+        id: `new-${fake.inserts.length + 1}`, status: 'queued', ...(DEFAULTS[this.table] ?? {}), ...row,
+      };
+      if (this.table === 'field_reports') reportTrigger(stored);
       fake.inserts.push(stored);
       (fake.tables[this.table] ??= []).push(stored);
       return stored;
@@ -122,6 +199,7 @@ class Query {
   /** Insert or merge on one key — how a per-owner settings row is written. */
   upsert(row, opts = {}) {
     this.mode = 'upsert';
+    if (this.offline) return this;
     const key = opts.onConflict ?? 'id';
     const table = (fake.tables[this.table] ??= []);
     const found = table.find((r) => r[key] === row[key]);
@@ -137,10 +215,20 @@ class Query {
   single() { this.one = true; return this; }
 
   then(resolve) {
+    if (this.offline) return Promise.resolve({ ...NO_NETWORK }).then(resolve);
+    if (this.mode !== 'select' && fake.loseAnswer[this.table]) {
+      // It landed; the phone just never heard.
+      delete fake.loseAnswer[this.table];
+      return Promise.resolve({ ...NO_NETWORK }).then(resolve);
+    }
+    if (this.error) {
+      const { status, ...error } = this.error;
+      return Promise.resolve({ data: null, error, status }).then(resolve);
+    }
     const failure = fake.failures[this.table];
     if (failure) return Promise.resolve({ data: null, error: failure }).then(resolve);
     const data = this.one ? (this.rows[0] ?? null) : this.rows;
-    return Promise.resolve(ok(data)).then(resolve);
+    return Promise.resolve({ ...ok(data), status: this.mode === 'insert' ? 201 : 200 }).then(resolve);
   }
 }
 

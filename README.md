@@ -123,8 +123,17 @@ and drives Claude Code lives on the PC, in its own repo.
   `npm run contrast` fails the build if one of them stops clearing it. The look
   is flat on purpose — a surface and a hairline, grouped lists, sentence case —
   so a screen has fewer edges to read around.
-- **Installable** — a PWA with an offline shell, so it opens instantly and still
-  shows the last synced state with no signal.
+- **Installable** — a PWA with an offline shell, so it opens instantly.
+- **No signal is not a problem** — a job, a message to your assistant, a field
+  report or a new site is kept on the phone the moment you press send, and
+  sends itself when the signal comes back; what the screens last read is kept
+  too, so the app opens on it and says how old it is. Retries can't land
+  twice. See [With no signal](#with-no-signal).
+- **Field reports** — `#/field` (in the menu, beside Ideas) is Field Reports
+  (`offline-sync-pwa`) moved in:
+  the sites you visit, what each needs, and filing a report on one — built for
+  the culvert with no signal, which is where reports get written. See
+  [Field reports](#field-reports).
 
 ## Running it
 
@@ -849,6 +858,84 @@ window. The desktop sidebar carries a compact copy on every screen but the
 front page, which already has them, and the New screen shows them above the
 composer, because what you have left is worth knowing before you send a job.
 
+## With no signal
+
+Everything that matters goes through an **outbox** on the phone (`outbox.js`,
+ported from Field Reports): a job, a message to your assistant, a field
+report, a new site. Pressing send writes it to IndexedDB first, and only then
+tries Supabase. With a signal, that is the insert it always was, a few
+milliseconds later. Without one, the thing is already safe. The composer
+clears, the toast says *saved on this phone*, and the thread shows it at the
+end as **not sent yet**, with *send now* and *discard*. A topbar pill counts
+what is waiting, and `#/outbox` lists all of it in one place.
+
+It sends itself when the network is back: on the `online` event, when the app
+comes to the front, on the ten-second timer while anything is due, and the
+moment any request gets an answer, since `navigator.onLine` is only a hint.
+One answer from Supabase decides what happens to an entry:
+
+| Answer | Means | Then |
+|---|---|---|
+| a row | it landed | removed from the outbox |
+| `23505` unique key | it had already landed: the first try got through, but its answer was lost | removed, counted as sent |
+| no network | nothing to talk to | stop; try the rest later |
+| `401`, `408`, `429`, `5xx` | a lapsed token, or the server having a moment | back off (2 s, doubling, capped at 5 min); park after 8 tries |
+| any other `4xx` | it will never be accepted as it is | parked as **refused**, with the reason, until you retry or discard it |
+
+A retry that lands twice is ruled out by ids the phone makes itself. A report's
+id is its primary key. Jobs and messages carry a `client_id` with a unique
+index (from `bridge/schema.sql`). Two tabs sending at once can't double-send
+either: an entry is leased in the same IndexedDB transaction that checks it.
+A table that doesn't have `client_id` yet still takes the write, just without
+that guard.
+
+**What the screens last read is kept as well** (the "saved copy" in
+`store.js`): the newest 200 jobs and the logs of the last 40, your
+conversations, the house and your sites. The app opens on it before asking
+the network anything. A read that fails keeps what is on screen instead of
+blanking it, and never puts a setup card up over saved data. The offline bar
+says how old it is ("last read 3h ago"). Opened with no signal and an expired
+access token, the app still opens on that account's saved copy and outbox, and
+signs back in by itself when the signal returns. Signing out deletes the saved
+copy and keeps the outbox, which sends when that account signs in again.
+
+**House taps are not kept.** A light that switches hours after you tapped it is
+worse than one that didn't, so with no signal a tap says *nothing changed* and
+goes nowhere.
+
+## Field reports
+
+`#/field` is Field Reports (`offline-sync-pwa`), moved out of its own
+FastAPI-on-Fly server and into this account's Supabase. You get a list of
+sites, filterable by what was last found (*OK*, *needs work*, *blocked*, *not
+visited*), with the count that needs someone as the hero figure. Each site's
+page has the address, who to call (a Call button), how to get in, and its
+reports newest first. *File report* is a bottom sheet with three choices, a
+note and your name, which is remembered. *Add a site* works the same way, and
+an empty account offers Field Reports' own 14 demo sites to try it with. It is
+in the menu beside Ideas rather than in the tab bar, which stays at five, and
+`f` opens it on a keyboard.
+
+Both writes go through the outbox, so a report filed in a culvert is kept on
+the phone, shown at the top of the site's history as *not sent*, and the site
+already shows what you found. A site added with no signal can have reports
+filed on it straight away, and they wait for the site to reach Supabase first.
+
+A site's status is its **newest report's**, newest by when it was *recorded*
+on the phone rather than when it arrived. So a report that waited all day for
+a signal can't overwrite what someone has seen since. A database trigger does
+this, as Field Reports' server did, and so does the screen when it overlays
+what is still waiting. The phone's clock is trusted within reason: a time more
+than ten minutes in the future becomes the server's.
+
+### The tables it wants
+
+`field_sites` and `field_reports`, in the same `bridge/schema.sql` as
+everything else and safe to run again. Each is locked to your own account, and
+a report can only point at one of your own sites. Without them, the Field
+screen carries the SQL, a link to your project's SQL editor and a *check
+again* button, like the Assistant and House screens.
+
 ## Less on screen at once
 
 The phone used to carry a home screen of eight stacked blocks, a drawer as the
@@ -1054,7 +1141,7 @@ project, it just has less to say about each.
 ## Tests
 
 ```sh
-npm test            # contrast guard, the app in jsdom, the cloud runner, then the bridge
+npm test            # contrast guard, the outbox, the app in jsdom, the cloud runner, then the bridge
 npm run contrast    # just the colour claims
 ```
 
@@ -1105,6 +1192,22 @@ conversation with nothing in it still has a name) and the bridge's adapters
 (every response dialect it claims to understand, a stream split mid-token, an
 error arriving mid-stream thrown rather than printed as the answer, and a
 line it cannot parse kept as prose rather than dropped).
+
+The walk also covers field reports and having no signal. Filing a report, with
+a signal and without one, and the site taking the newer finding. A failed read
+keeping the screen. A job, a message and a report kept on the phone and drawn
+as not sent, while a house tap is refused. The outbox draining when the signal
+returns, a report keeping the time it was written, a write whose answer was
+lost not landing twice, a table without `client_id` still taking the message,
+a refused report kept with its reason and sent once fixed, adding a site, the
+setup card, and the demo sites. The fake Supabase does those failures the way
+a real one does: no network, a lost answer, a unique key, a missing column.
+
+`test/offline.mjs` pins the outbox's corners against a hand-turned clock: what
+each answer means, the backoff and when it gives up, two flushes racing for
+one entry, a lease left by a dead tab expiring, and a report waiting for its
+site. It also covers the field model: a queued report shown as the site's
+status, unless something newer is already saved.
 
 `npm run contrast` is the other half of the net. It parses the tokens out of
 `style.css` and asserts the claims this README makes about them: every ink
@@ -1225,6 +1328,11 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `md.js` | A small Markdown subset, escape-first so output is safe |
 | `util.js` | Escaping, time and text helpers |
 | `sw.js` | Service worker: caches the app shell, never Supabase traffic |
+| `outbox.js` | The outbox: what is kept to send, when it goes, and what an answer means. Ported from Field Reports. No DOM, no Supabase |
+| `idb.js` | IndexedDB for the outbox and the saved copy, with an in-memory fallback where IndexedDB is unavailable |
+| `field.js` | Field reports: the sites with anything still waiting laid over them, the tally, a site's history. Pure |
+| `field-demo.js` | Field Reports' 14 demo sites, loaded only when asked for |
+| `test/offline.mjs` | The outbox and the field model on their own, with a clock turned by hand |
 | `test/bridge.mjs` | Runs the real bridge against a stand-in for PostgREST |
 | `tools/contrast.mjs` | Asserts the colour claims against `style.css` |
 | `tools/icon.mjs` | Redraws `icon.png` from the brand geometry |
@@ -1276,6 +1384,9 @@ the signed-in user:
 | `house_devices` | `owner, entity_id, name, area, kind, state, is_on, attrs, updated_at` — optional; see [Your house](#your-house) |
 | `house_hubs` | `owner, relay, host, priority, mirroring, name, kind, devices, reachable, error, last_seen` — one row per relay, keyed `(owner, relay)` |
 | `house_commands` | `id, owner, entity_id, name, action, value, source, status, error, created_at` |
+| `field_sites` | `id, owner, name, address, region, asset_tag, priority, access_notes, contact_name, contact_phone, status, last_report_at` — optional; see [Field reports](#field-reports) |
+| `field_reports` | `id, owner, site_id, status, note, author, recorded_at, received_at` — `id` is made on the phone |
+| `jobs.client_id`, `chat_messages.client_id` | optional, unique; the guard against a retry landing twice — see [With no signal](#with-no-signal) |
 
 A job's `status` is `queued`, `running`, `paused`, `done` or `error`. A desktop
 counts as online if its `last_seen` is under 30 seconds old, and so does a
@@ -1443,6 +1554,21 @@ house that has stopped answering.
   would sit there looking like nothing happened until the leader's next poll.
   Ten seconds is a long time to wonder whether you turned the light off.
 
+- **Field Reports moved into Supabase rather than being linked to.** Its own
+  server is SQLite on Fly, which resets on every restart without a volume, and
+  has no sign-in. Here it gets this account's sign-in, row-level security and
+  realtime. Its offline machinery (the outbox, the saved copy, the honest
+  status line) came over too, and now covers jobs and messages as well.
+- **A queued job keeps the time it was sent, not the time it was typed.** A
+  report is the opposite, because its time is a fact about the site. A job's
+  time decides its place in the queue the runners read, and a job typed this
+  morning on a train should not jump ahead of one sent this afternoon from the
+  desk.
+- **No Background Sync.** Only Chromium has it, and the service worker cannot
+  reach the sign-in, which supabase-js keeps in `localStorage`. Sending when
+  the app is open covers it: nothing is lost either way, it just waits for you
+  to open the app.
+
 ## Keyboard
 
 | Key | Does |
@@ -1456,4 +1582,6 @@ house that has stopped answering.
 | `k` | As**k** your assistant |
 | `i` | Ideas |
 | `p` | Projects |
+| `f` | Field reports |
+| `o` | The outbox |
 | `Esc` | Close the drawer, the options panel, or unfocus the composer |

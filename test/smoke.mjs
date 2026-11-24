@@ -1353,6 +1353,312 @@ fake.tables.house_hubs = [{
 await houseStore.loadHouse();
 await tick();
 
+// ── 10g. field reports ────────────────────────────────────────────────
+// Field Reports (offline-sync-pwa), moved in: the sites, one site, and
+// filing a report — first with a signal, then without one.
+
+const press = (k) => window.document.dispatchEvent(
+  new window.KeyboardEvent('keydown', { key: k, bubbles: true }));
+const submit = (id) => el(id).dispatchEvent(new window.Event('submit', { cancelable: true, bubbles: true }));
+const pick = (name, value) => {
+  window.document.querySelector(`input[name="${name}"][value="${value}"]`).checked = true;
+};
+
+// Earlier sections moved jobs along by realtime events alone. The walk
+// below reloads, as a phone does when the signal comes back, so the fake's
+// tables are brought to where the screen left them — which is where a real
+// server would be.
+for (const j of store.state.jobs.values()) {
+  const stored = fake.tables.jobs.find((r) => r.id === j.id);
+  if (stored) Object.assign(stored, j);
+}
+
+window.document.activeElement?.blur?.();
+press('f');
+await tick();
+ok('"f" opens field reports', window.location.hash === '#/field');
+ok('the field view shows', !el('field-view').hidden);
+ok('its menu door is the current one', el('field-link').getAttribute('aria-current') === 'page');
+ok('and the tab bar stays at five, with no tab lit', !el('tabbar').querySelector('[aria-current]')
+  && el('tabbar').querySelectorAll('.tab').length === 5);
+ok('no setup card when the tables are there', el('field-setup').hidden);
+const siteRows = () => [...el('field-list').querySelectorAll('.site-row')];
+ok('every site is listed', siteRows().length === 3, String(siteRows().length));
+has('highest priority first, then by name', siteRows()[0].textContent, 'Etobicoke');
+ok('the hero counts what needs someone', text('field-value') === '2', text('field-value'));
+has('the hero says what the number is', text('field-label'), 'need attention');
+has('a finding is a word, not just a colour', siteRows()[0].textContent, 'Needs work');
+ok('markup in a site name is shown, not run',
+  !el('field-list').querySelector('b') && el('field-list').textContent.includes('<b>Telemetry</b>'));
+has('the topbar counts the sites', text('view-sub'), '3 sites');
+
+el('field-filters').querySelector('[data-field-filter="blocked"]').click();
+await tick();
+ok('a filter narrows the list', siteRows().length === 1);
+has('to the one it names', siteRows()[0].textContent, 'Blocked');
+el('field-filters').querySelector('[data-field-filter="all"]').click();
+await tick();
+
+// One site.
+window.location.hash = siteRows()[0].getAttribute('href');
+await tick();
+ok('a site opens on its own screen', !el('site-view').hidden && window.location.hash === '#/field/site-a');
+has('it is named in the topbar', text('view-title'), 'Etobicoke Creek Weir');
+has('it says how to get in', el('site-info').textContent, 'No cell signal in the culvert');
+ok('the contact can be called from it',
+  el('site-info').querySelector('a.btn[href="tel:+14165550188"]') !== null);
+has('its reports are listed', el('site-reports').textContent, 'Debris screen');
+ok('the Field door stays current on a site', el('field-link').getAttribute('aria-current') === 'page');
+
+// Filing one, with a signal.
+const reportsBefore = fake.tables.field_reports.length;
+el('site-file').click();
+await tick();
+ok('the report sheet opens', el('report-dialog').open);
+has('it names the site', text('report-site'), 'Etobicoke');
+has('the button says it will send now', text('report-save'), 'Save and send');
+pick('finding', 'blocked');
+el('report-note').value = 'Gate chained shut, <script>alert(1)</script> no key on site.';
+el('report-author').value = 'A. Tester';
+submit('report-form');
+await tick(120);
+ok('the sheet closes once it is safe', !el('report-dialog').open);
+ok('a report is written', fake.tables.field_reports.length === reportsBefore + 1);
+const filed = fake.tables.field_reports.at(-1);
+ok('with an id made on the phone, which the table can check', /^rep-[0-9a-f]{32}$/.test(filed.id), filed.id);
+ok('owned by you, on that site', filed.owner === 'u1' && filed.site_id === 'site-a');
+ok('carrying what you found, and who you are', filed.status === 'blocked' && filed.author === 'A. Tester');
+ok('stamped with when it was written', Date.now() - Date.parse(filed.recorded_at) < 60_000);
+has('the toast says it was filed', el('toasts').textContent, 'Filed');
+ok('your name is remembered for next time', window.localStorage.getItem('cr-field-author') === 'A. Tester');
+await tick(60);
+has('the site takes the new finding', el('site-head').textContent, 'Blocked');
+ok('the note is shown as text, not run',
+  !el('site-reports').querySelector('script') && el('site-reports').textContent.includes('<script>'));
+ok('nothing is left waiting', store.state.outbox.length === 0);
+
+// ── with no signal ────────────────────────────────────────────────────
+// The point of all of it: the phone keeps what you send, says so, shows
+// what it last read, and sends the lot when the signal is back.
+
+Object.defineProperty(window.navigator, 'onLine', { get: () => !fake.offline, configurable: true });
+fake.offline = true;
+window.dispatchEvent(new window.Event('offline'));
+await tick();
+ok('the offline bar shows', !el('offline-bar').hidden);
+has('and says how old the screen is', text('offline-text'), 'last read');
+
+// Reading still works: a failed read keeps what is on screen.
+const jobsBefore = store.state.jobs.size;
+await store.loadAll('alpha');
+await store.loadAsk();
+await store.loadHouse();
+await store.loadField();
+await tick();
+ok('a read with no signal keeps the jobs on screen', store.state.jobs.size === jobsBefore && jobsBefore > 0);
+ok('and does not claim the assistant tables are missing', store.state.askReady);
+ok('nor the house tables', store.state.houseReady);
+ok('nor the field tables', store.state.fieldReady && siteRows().length + 1 > 0);
+
+// A report, filed in the culvert.
+el('site-file').click();
+await tick();
+has('the button says it will keep it', text('report-save'), 'Save to outbox');
+has('and why', text('report-foot'), 'No signal');
+pick('finding', 'ok');
+el('report-note').value = 'Screen cleared, flow normal.';
+const reportsOffline = fake.tables.field_reports.length;
+submit('report-form');
+await tick(120);
+ok('nothing reaches Supabase with no signal', fake.tables.field_reports.length === reportsOffline);
+ok('it is kept on the phone', store.state.outbox.length === 1 && store.state.outbox[0].kind === 'report');
+has('the toast says it is saved, not sent', el('toasts').textContent, 'sends itself when you have signal');
+has('the site shows the new finding already', el('site-head').textContent, 'OK');
+has('marked as not sent', el('site-head').textContent, 'not sent');
+ok('the report is at the top of the history, waiting',
+  el('site-reports').firstElementChild?.dataset.unsent === store.state.outbox[0].id);
+ok('the outbox pill appears', !el('outbox-pill').hidden);
+ok('and the Field door counts it', text('field-count') === '1');
+
+// A job, typed on the train.
+window.location.hash = '#/p/alpha';
+await tick();
+const insertsOffline = fake.inserts.length;
+el('prompt').value = 'make the snake faster on level 3';
+submit('composer');
+await tick(120);
+ok('a job with no signal is not inserted', fake.inserts.length === insertsOffline);
+ok('the composer is cleared, because it is safe', el('prompt').value === '');
+has('the toast says where it is', el('toasts').textContent, 'Saved on this phone');
+const unsentTurn = el('thread').querySelector('[data-unsent-turn]');
+ok('the thread shows it at the end, as not sent', Boolean(unsentTurn));
+has('with what you asked', unsentTurn?.textContent ?? '', 'snake faster');
+has('and what will happen to it', unsentTurn?.textContent ?? '', 'sends itself when there is signal');
+ok('with a way to discard it', Boolean(unsentTurn?.querySelector('[data-outbox-discard]')));
+
+// A message to your assistant.
+window.location.hash = '#/ask/c1';
+await tick();
+el('prompt').value = 'remind me what the weir needs';
+submit('composer');
+await tick(120);
+ok('a message with no signal is not inserted', fake.inserts.length === insertsOffline);
+ok('the ask thread shows it, not sent', Boolean(el('ask-thread').querySelector('[data-unsent-turn]')));
+
+// A tap is the one thing not kept.
+window.location.hash = '#/house';
+await tick();
+const tapBtn = el('house-rooms').querySelector('[data-house-act]');
+tapBtn?.click();
+await tick(120);
+ok('a house tap with no signal writes nothing', fake.inserts.length === insertsOffline);
+has('and says it was not kept', el('toasts').textContent, 'not saved for later');
+
+// The outbox, all in one place.
+press('o');
+await tick();
+ok('"o" opens the outbox', window.location.hash === '#/outbox');
+const outboxRows = el('outbox-list').querySelectorAll('.outbox-row');
+ok('it lists the three things waiting', outboxRows.length === 3, String(outboxRows.length));
+has('it says there is no signal', text('outbox-intro'), 'No signal');
+has('the pill counts them', text('outbox-pill-text'), '3');
+has('so does the offline bar', text('offline-text'), '3 waiting to send');
+ok('the outbox door counts them too', text('outbox-side-count') === '3');
+
+// The saved copy: what the app opens on next time there is no signal.
+await store.saveCopy();
+const savedJobs = store.state.jobs.size;
+store.state.jobs.clear();
+ok('a saved copy can be put back on screen', await store.restoreCopy('u1'));
+ok('with the jobs it had', store.state.jobs.size === savedJobs);
+ok('and it says it came off the phone', store.state.sync.fromSaved);
+ok('a saved copy is only ever its own account\'s', !(await store.restoreCopy('someone-else')));
+
+// ── the signal comes back ─────────────────────────────────────────────
+
+fake.offline = false;
+window.dispatchEvent(new window.Event('online'));
+await tick(200);
+ok('the outbox drains on its own', store.state.outbox.length === 0,
+  store.state.outbox.map((e) => `${e.kind}:${e.state}:${e.lastError}`).join(' | '));
+ok('the offline bar goes', el('offline-bar').hidden);
+ok('the pill goes', el('outbox-pill').hidden);
+const lateReport = fake.tables.field_reports.find((r) => r.note === 'Screen cleared, flow normal.');
+ok('the report reached Supabase', Boolean(lateReport));
+ok('keeping the time it was written, not the time it was sent',
+  lateReport && Date.parse(lateReport.received_at) >= Date.parse(lateReport.recorded_at));
+const lateJob = fake.tables.jobs.find((j) => j.prompt === 'make the snake faster on level 3');
+ok('the job reached Supabase', Boolean(lateJob));
+ok('carrying the id the phone gave it', typeof lateJob?.client_id === 'string' && lateJob.client_id.length >= 32);
+ok('on the project it was sent from', lateJob?.project_slug === 'alpha' && lateJob?.mode === 'existing');
+const askedLate = fake.tables.chat_messages.find((m) => m.text === 'remind me what the weir needs');
+const lateAsk = fake.tables.chat_messages.filter((m) =>
+  askedLate && String(m.client_id ?? '').startsWith(askedLate.client_id.split(':')[0]));
+ok('the message and its empty reply went together',
+  lateAsk.length === 2 && lateAsk[0].role === 'user' && lateAsk[1].role === 'assistant'
+  && lateAsk[1].status === 'queued' && lateAsk[1].text === '');
+ok('into the conversation it was written in', lateAsk.every((m) => m.chat_id === 'c1'));
+
+// ── a write that landed, whose answer was lost ────────────────────────
+// The reason for `client_id`: the retry is refused as a copy, and counted
+// as sent, rather than queueing the same job twice.
+
+window.location.hash = '#/p/alpha';
+await tick();
+fake.loseAnswer.jobs = true;
+el('prompt').value = 'add a pause button';
+submit('composer');
+await tick(120);
+ok('a lost answer leaves the job waiting', store.state.outbox.length === 1);
+await store.flushOutbox();
+await tick();
+ok('the retry clears it', store.state.outbox.length === 0);
+ok('and there is still exactly one of it',
+  fake.tables.jobs.filter((j) => j.prompt === 'add a pause button').length === 1);
+
+// ── a table that predates `client_id` ─────────────────────────────────
+
+fake.missingColumns.chat_messages = ['client_id'];
+window.location.hash = '#/ask/c1';
+await tick();
+el('prompt').value = 'and the pump house?';
+submit('composer');
+await tick(120);
+ok('a table without the column still takes the message',
+  fake.tables.chat_messages.some((m) => m.text === 'and the pump house?' && !('client_id' in m)));
+ok('nothing is left waiting for it', store.state.outbox.length === 0);
+fake.missingColumns = {};
+
+// ── a report Supabase refuses ─────────────────────────────────────────
+
+fake.failures.field_reports = { code: '42501', message: 'new row violates row-level security policy' };
+window.location.hash = '#/field/site-c';
+await tick();
+el('site-file').click();
+pick('finding', 'needs_work');
+el('report-note').value = 'Logbook missing.';
+submit('report-form');
+await tick(120);
+ok('a refused report is kept, not lost', store.state.outbox.length === 1 && store.state.outbox[0].state === 'failed');
+has('the toast says it was refused', el('toasts').textContent, 'refused');
+has('the site says why', el('site-reports').textContent, 'refused it for this account');
+window.location.hash = '#/outbox';
+await tick();
+has('the outbox says why too', el('outbox-list').textContent, 'row-level security');
+delete fake.failures.field_reports;
+el('outbox-list').querySelector('[data-outbox-retry]').click();
+await tick(150);
+ok('sending it again once fixed works', store.state.outbox.length === 0);
+ok('and it is there', fake.tables.field_reports.some((r) => r.note === 'Logbook missing.'));
+
+// ── adding a site ─────────────────────────────────────────────────────
+
+window.location.hash = '#/field';
+await tick();
+el('field-foot').querySelector('[data-site-add]').click();
+await tick();
+ok('the add-site sheet opens', el('site-dialog').open);
+submit('site-form');
+await tick();
+ok('a site needs a name', !el('site-error').hidden && el('site-dialog').open);
+el('site-name').value = 'Humber Bay Flow Meter';
+el('site-address').value = '2111 Lake Shore Blvd W';
+pick('site-priority', '1');
+el('site-phone').value = '+1 416 555 0134';
+submit('site-form');
+await tick(150);
+const added = fake.tables.field_sites.find((s) => s.name === 'Humber Bay Flow Meter');
+ok('the site is written', Boolean(added));
+ok('with the priority you picked', added?.priority === 1);
+ok('it opens on its own screen', window.location.hash === `#/field/${added?.id}`);
+ok('as not visited yet', el('site-head').textContent.includes('Not visited'));
+
+// ── a schema that predates field reports ──────────────────────────────
+
+fake.failTable('field_sites', 'relation "public.field_sites" does not exist');
+window.location.hash = '#/field';
+await tick();
+await store.loadField();
+await tick();
+ok('a missing table is a setup card, not a crash', !el('field-setup').hidden);
+has('it names the file to run', el('field-setup').textContent, 'bridge/schema.sql');
+has('and says what the read said', el('field-setup').textContent, 'does not exist');
+fake.failTable('field_sites', null);
+fake.tables.field_sites = [];
+fake.tables.field_reports = [];
+el('field-setup').querySelector('[data-field-recheck]').click();
+await tick(120);
+ok('checking again finds the tables', el('field-setup').hidden);
+ok('an empty account offers a way in', !el('field-empty').hidden);
+ok('including the demo sites', !el('field-demo').hidden);
+el('field-demo').click();
+await tick(200);
+ok('the demo loads Field Reports\' own fourteen sites', siteRows().length === 14, String(siteRows().length));
+ok('with their reports', fake.tables.field_reports.length === 9);
+
+window.location.hash = '#/';
+await tick();
+
 // ── 11. clearing a chat ───────────────────────────────────────────────
 
 window.location.hash = '#/p/beta';

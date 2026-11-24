@@ -1,17 +1,19 @@
 // Entry point: boot, auth, view switching, the composer, and the handful of
 // listeners that tie the store to the views.
 
-import { $, firstLine, signedOut, SIGNED_OUT_FIX } from './util.js';
+import { $, firstLine, plural, signedOut, SIGNED_OUT_FIX } from './util.js';
 import * as store from './store.js';
 import * as views from './views.js';
 import {
   initTheme, initNotify, notify, startTicker, toast, ask, copy,
-  openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow, setOffline,
+  openDrawer, closeDrawer, drawerOpen, trapFocus, isNarrow,
   openSheet, closeSheet, initSheet, sheetOpen,
 } from './ui.js';
-import { route, initRouter, syncRoute, go, projectHref, askHref } from './router.js';
+import { route, initRouter, syncRoute, go, projectHref, askHref, siteHref } from './router.js';
 import { STARTERS } from './assistant.js';
 import { commandLabel } from './house.js';
+import { cleanSite, cleanReport, STATUS_WORD } from './field.js';
+import { isNetworkError } from './outbox.js';
 
 if (!store.configured) {
   document.body.innerHTML =
@@ -23,6 +25,16 @@ if (!store.configured) {
 }
 
 const PREFS = 'cr-compose';
+
+/**
+ * What to say when a write failed. With no signal the browser's own words
+ * ("TypeError: Failed to fetch") are true and useless, so that one case
+ * gets a sentence a person can act on.
+ */
+const why = (error) => (isNetworkError({ error, status: error?.status })
+  || /failed to fetch|networkerror|load failed/i.test(String(error?.message ?? ''))
+  ? 'No signal — try again when you are back online'
+  : error?.message ?? 'Something went wrong');
 
 // ── composer settings ─────────────────────────────────────────────────
 
@@ -91,6 +103,9 @@ function draw() {
   $('agents-view').hidden = v !== 'agents';
   $('house-view').hidden = v !== 'house';
   $('ask-view').hidden = v !== 'ask';
+  $('field-view').hidden = v !== 'field';
+  $('site-view').hidden = v !== 'site';
+  $('outbox-view').hidden = v !== 'outbox';
   // The composer belongs to the two views you type into; everywhere else the
   // bottom of a phone screen is better spent on the tabs.
   const typing = v === 'project' || v === 'pending' || v === 'new' || v === 'ask';
@@ -115,6 +130,8 @@ function draw() {
   views.renderFleetBadge();
   views.renderAskBadge();
   views.renderHouseBadge();
+  views.renderFieldBadge();
+  views.renderSync();
   views.renderTabs();
   // Only the new-project view shows them, and they read the whole account to
   // work it out.
@@ -124,11 +141,18 @@ function draw() {
   if (v === 'agents') views.renderAgents();
   if (v === 'house') views.renderHouse();
   if (v === 'ask') views.renderAsk();
+  if (v === 'field') views.renderField();
+  if (v === 'site') views.renderSite();
+  if (v === 'outbox') views.renderOutbox();
+  if ($('report-dialog').open) paintReportButton();
 
   if (v === 'project') views.renderChat();
   if (v === 'pending') {
-    const job = store.state.jobs.get(route.jobId);
+    // The id in the URL can be the one this phone gave a job before it was
+    // sent; once Supabase has it, follow it to its real id.
+    const job = store.jobByRef(route.jobId);
     if (job?.project_slug) { go(`#/p/${encodeURIComponent(job.project_slug)}`); return; }
+    if (job && String(job.id) !== String(route.jobId)) { go(`#/j/${encodeURIComponent(job.id)}`); return; }
     views.renderPending(job);
   }
 
@@ -180,6 +204,7 @@ function onRoute() {
   stick = true;
   scroller().scrollTop = 0;
   if (route.view === 'project') store.loadThreadEvents(route.slug);
+  if (route.view === 'site' && !savedOnly) store.loadSiteReports(route.siteId);
   render();
   if (inThread()) scrollToEnd('auto');
 }
@@ -194,6 +219,15 @@ $('ideas-link').addEventListener('click', closeDrawer);
 $('projects-link').addEventListener('click', closeDrawer);
 $('agents-link').addEventListener('click', closeDrawer);
 $('house-link').addEventListener('click', closeDrawer);
+$('field-link').addEventListener('click', closeDrawer);
+$('outbox-link').addEventListener('click', closeDrawer);
+$('outbox-pill').addEventListener('click', () => go('#/outbox'));
+// The bar says how old the screen is; tapping it says what is waiting.
+$('offline-bar').addEventListener('click', () => {
+  if (store.state.outbox.length) { go('#/outbox'); return; }
+  toast('No signal. What you see was saved on this phone; anything you send waits here and goes when you are back.',
+    { glyph: 'offline', ms: 5200 });
+});
 $('ask-link').addEventListener('click', closeDrawer);
 
 $('project-search').addEventListener('input', (e) => {
@@ -223,7 +257,7 @@ for (const id of ['ask-presence', 'ask-who']) {
 
 $('ask-new').addEventListener('click', async () => {
   const { data, error } = await store.startConversation();
-  if (error) { toast(error.message, { bad: true }); return; }
+  if (error) { toast(why(error), { bad: true }); return; }
   go(askHref(data?.id));
   focusPrompt();
 });
@@ -267,7 +301,20 @@ $('slots').addEventListener('change', async (e) => {
 
 $('sign-out').addEventListener('click', async () => {
   closeDrawer();
-  await store.sb.auth.signOut();
+  const waiting = store.state.outbox.length;
+  if (waiting) {
+    const ok = await ask({
+      title: `Sign out with ${plural(waiting, 'thing')} not sent?`,
+      body: 'They stay on this phone and send when you sign back in to this account — not before.',
+      confirm: 'Sign out',
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  const { error } = await store.sb.auth.signOut();
+  if (error) { toast(why(error), { bad: true }); return; }
+  // The saved copy is your account's data on this device; it goes with you.
+  await store.forgetOwner();
 });
 
 // composer options
@@ -332,7 +379,7 @@ $('composer').addEventListener('submit', async (e) => {
 
   const inProject = route.view === 'project';
   const { effort, cap, visibility } = settings();
-  const { data, error } = await store.createJob({
+  const r = await store.createJob({
     prompt: text,
     slug: inProject ? route.slug : null,
     visibility,
@@ -340,14 +387,16 @@ $('composer').addEventListener('submit', async (e) => {
     cap,
   });
 
-  if (error) {
-    note.textContent = error.message;
+  // Not even kept: nothing to do but say why and leave the text where it is.
+  if (!r.entry) {
+    note.textContent = r.error ?? 'Could not keep that job';
     note.hidden = false;
     toast('Could not queue that job', { bad: true });
     btn.disabled = false;
     return;
   }
 
+  // From here it is safe on this phone, whatever the network did with it.
   prompt.value = '';
   autoGrow();
   $('opts').hidden = true;
@@ -356,8 +405,16 @@ $('composer').addEventListener('submit', async (e) => {
   stick = true;
   rememberSettings();
 
-  toast(queuedSentence(inProject ? route.slug : null, data?.id), { ms: 3400 });
-  if (!inProject && data?.id) go(`#/j/${data.id}`);
+  if (r.outcome === 'failed') {
+    note.textContent = `Supabase refused it: ${r.error}. It is kept in the outbox — send it again from there once that is fixed, or discard it.`;
+    note.hidden = false;
+    toast('Not queued — Supabase refused it', { bad: true, ms: 4200 });
+  } else if (r.outcome === 'waiting') {
+    toast('Saved on this phone — it sends itself when there is signal', { glyph: 'outbox', ms: 3800 });
+  } else {
+    toast(queuedSentence(inProject ? route.slug : null, r.serverId), { ms: 3400 });
+  }
+  if (!inProject) go(`#/j/${encodeURIComponent(r.serverId ?? r.entry.id)}`);
   else { scheduleRender(); scrollToEnd(); }
 });
 
@@ -372,11 +429,13 @@ async function sendToAssistant(text) {
   btn.disabled = true;
   note.hidden = true;
 
+  // The conversation in the URL is kept even when this phone has nothing of
+  // it yet, so a draft started with no signal stays the one you are in.
   const current = views.currentConversation();
-  const { error, chatId } = await store.askAssistant({ chatId: current?.id ?? null, text });
+  const r = await store.askAssistant({ chatId: current?.id ?? route.chatId ?? null, text });
 
-  if (error) {
-    note.textContent = error.message;
+  if (!r.entry) {
+    note.textContent = r.error ?? 'Could not keep that message';
     note.hidden = false;
     toast('Could not send that', { bad: true });
     btn.disabled = false;
@@ -387,9 +446,18 @@ async function sendToAssistant(text) {
   autoGrow();
   btn.disabled = false;
   stick = true;
-  toast(askSentence(), { glyph: 'brain', ms: 3400 });
+  if (r.outcome === 'failed') {
+    note.textContent = `Supabase refused it: ${r.error}. It is kept in the outbox.`;
+    note.hidden = false;
+    toast('Not sent — Supabase refused it', { bad: true, ms: 4200 });
+  } else if (r.outcome === 'waiting') {
+    toast('Saved on this phone — it goes when there is signal, and the answer comes back here',
+      { glyph: 'outbox', ms: 4000 });
+  } else {
+    toast(askSentence(), { glyph: 'brain', ms: 3400 });
+  }
 
-  if (chatId && route.chatId !== chatId) go(askHref(chatId));
+  if (r.chatId && route.chatId !== r.chatId) go(askHref(r.chatId));
   else { scheduleRender(); scrollToEnd(); }
 }
 
@@ -399,7 +467,13 @@ async function sendToAssistant(text) {
  * that differs: your PC asleep, the hub not answering, or a light going off.
  */
 async function tapHouse(commands) {
-  const { error, rows } = await store.sendCommand(commands);
+  const { error, rows, offline } = await store.sendCommand(commands);
+  // A tap is the one write that is not kept for later: a light that switches
+  // hours after you pressed it is worse than one that didn't.
+  if (offline) {
+    toast('No signal — nothing changed. House taps are not saved for later.', { bad: true, ms: 4200 });
+    return;
+  }
   if (error) {
     toast(`Could not send that — ${error.message}`, { bad: true, ms: 4000 });
     return;
@@ -454,9 +528,87 @@ function queuedSentence(slug, id) {
 
 // delegated row actions
 document.addEventListener('click', async (e) => {
-  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete],[data-copy-schema],[data-copy-cmd],[data-ask-recheck],[data-house-act],[data-house-all],[data-house-recheck]');
+  const btn = e.target.closest?.('[data-cancel],[data-retry],[data-copy-log],[data-copy-summary],[data-delete-chat],[data-suggest],[data-idea-filter],[data-project-filter],[data-stop-all],[data-ask-starter],[data-ask-stop],[data-ask-copy],[data-ask-again],[data-ask-build],[data-ask-delete],[data-copy-schema],[data-copy-cmd],[data-ask-recheck],[data-house-act],[data-house-all],[data-house-recheck],[data-outbox-retry],[data-outbox-discard],[data-outbox-flush],[data-field-filter],[data-field-recheck],[data-field-demo],[data-site-add]');
   if (!btn) return;
   const d = btn.dataset;
+
+  // ── what is still on this phone ────────────────────────────────────
+
+  if (d.outboxRetry) {
+    btn.disabled = true;
+    await store.retryEntry(d.outboxRetry);
+    const left = store.outboxEntry(d.outboxRetry);
+    if (!left) toast('Sent', { glyph: 'check' });
+    else if (left.state === 'failed') toast(`Refused again — ${left.lastError}`, { bad: true, ms: 5000 });
+    else toast(store.state.sync.online ? 'Not through yet — it keeps trying'
+      : 'No signal — it goes when you are back in range', { glyph: 'outbox', ms: 3600 });
+    btn.disabled = false;
+    return;
+  }
+
+  if (d.outboxDiscard) {
+    const entry = store.outboxEntry(d.outboxDiscard);
+    if (!entry) return;
+    const ok = await ask({
+      title: 'Discard this?',
+      body: 'It has not reached Supabase, so it is gone for good — from this phone and everywhere.',
+      confirm: 'Discard',
+      danger: true,
+    });
+    if (!ok) return;
+    await store.discardEntry(entry.id);
+    toast('Discarded', { glyph: 'trash' });
+    return;
+  }
+
+  if (d.outboxFlush !== undefined) {
+    btn.disabled = true;
+    const before = store.state.outbox.length;
+    await store.retryEverything();
+    const left = store.state.outbox.length;
+    btn.disabled = false;
+    if (!left) toast(`${plural(before, 'thing')} sent`, { glyph: 'check' });
+    else if (!store.state.sync.online) toast('No signal — still waiting', { bad: true });
+    else toast(`${before - left} sent, ${left} still waiting`, { glyph: 'outbox', ms: 3600 });
+    return;
+  }
+
+  // ── field reports ──────────────────────────────────────────────────
+
+  if (d.fieldFilter) {
+    views.setFieldFilter(d.fieldFilter);
+    views.renderField();
+    return;
+  }
+
+  if (d.siteAdd !== undefined) {
+    openSiteSheet();
+    return;
+  }
+
+  if (d.fieldDemo !== undefined) {
+    btn.disabled = true;
+    const r = await store.loadDemoSites();
+    btn.disabled = false;
+    if (r.offline) toast('The demo sites need a signal to load', { bad: true });
+    else if (r.error) toast(`Could not load them — ${r.error.message}`, { bad: true, ms: 4500 });
+    else toast(`${r.count} demo sites added — Field Reports' own`, { glyph: 'clipboard' });
+    return;
+  }
+
+  if (d.fieldRecheck !== undefined) {
+    const was = store.state.fieldReady;
+    btn.disabled = true;
+    await store.loadField();
+    btn.disabled = false;
+    if (!store.state.fieldReady) {
+      toast(store.state.sync.online ? 'Still missing — the tables are not there yet'
+        : 'No signal — try again when you are back online', { bad: true });
+    } else if (!was) {
+      toast('Tables are there. Add your first site.', { glyph: 'check', ms: 4000 });
+    }
+    return;
+  }
 
   // ── the house ──────────────────────────────────────────────────────
   // One tap writes one row per device. The row *is* the receipt: the card
@@ -545,7 +697,7 @@ document.addEventListener('click', async (e) => {
   if (d.askStop) {
     btn.disabled = true;
     const { error } = await store.stopReply(d.askStop);
-    if (error) { toast(error.message, { bad: true }); btn.disabled = false; }
+    if (error) { toast(why(error), { bad: true }); btn.disabled = false; }
     else toast('Stopping…', { glyph: 'stop' });
     return;
   }
@@ -558,7 +710,7 @@ document.addEventListener('click', async (e) => {
   if (d.askAgain) {
     btn.disabled = true;
     const { error } = await store.askAgain(d.askAgain);
-    if (error) { toast(error.message, { bad: true }); btn.disabled = false; return; }
+    if (error) { toast(why(error), { bad: true }); btn.disabled = false; return; }
     toast(askSentence(), { glyph: 'brain' });
     return;
   }
@@ -584,7 +736,7 @@ document.addEventListener('click', async (e) => {
     if (!ok) return;
     btn.disabled = true;
     const { error } = await store.deleteConversation(d.askDelete);
-    if (error) { toast(error.message, { bad: true }); btn.disabled = false; return; }
+    if (error) { toast(why(error), { bad: true }); btn.disabled = false; return; }
     toast('Conversation deleted');
     go('#/ask');
     return;
@@ -634,7 +786,7 @@ document.addEventListener('click', async (e) => {
   if (d.cancel) {
     btn.disabled = true;
     const { error } = await store.cancelJob(d.cancel);
-    if (error) { toast(error.message, { bad: true }); btn.disabled = false; }
+    if (error) { toast(why(error), { bad: true }); btn.disabled = false; }
     else toast('Stopping…', { glyph: 'stop' });
     return;
   }
@@ -673,10 +825,107 @@ document.addEventListener('click', async (e) => {
     if (!ok) return;
     btn.disabled = true;
     const { error } = await store.deleteChat(d.deleteChat);
-    if (error) { toast(error.message, { bad: true }); btn.disabled = false; return; }
+    if (error) { toast(why(error), { bad: true }); btn.disabled = false; return; }
     toast('Chat cleared');
     go('#/');
   }
+});
+
+// ── the two sheets ────────────────────────────────────────────────────
+// Filing a report and adding a site. Each closes the moment what you typed
+// is safe on this phone; whether it has *gone* yet is the toast's job and
+// the outbox's, not something to make you stand there waiting for.
+
+const AUTHOR = 'cr-field-author';
+let reportFor = null;
+
+/** The button says what will actually happen: sent now, or kept for later. */
+function paintReportButton() {
+  const on = store.state.sync.online;
+  $('report-save').textContent = on ? 'Save and send' : 'Save to outbox';
+  $('report-foot').textContent = on
+    ? 'Saved on this phone first, then sent. Nothing is lost if the signal drops mid-send.'
+    : 'No signal. It is kept on this phone and sends itself once you are back in range.';
+}
+
+function openReport(siteId) {
+  const site = store.fieldSiteOf(siteId);
+  if (!site) return;
+  reportFor = site.id;
+  $('report-site').textContent = site.name;
+  setRadio('finding', 'ok');
+  $('report-note').value = '';
+  try { $('report-author').value = localStorage.getItem(AUTHOR) ?? ''; } catch { /* blocked */ }
+  $('report-error').hidden = true;
+  paintReportButton();
+  openSheet('report-dialog');
+}
+
+$('site-file').addEventListener('click', (e) => openReport(e.currentTarget.dataset.site));
+initSheet('report-dialog');
+$('report-close').addEventListener('click', () => closeSheet('report-dialog'));
+
+$('report-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = { status: radio('finding'), note: $('report-note').value, author: $('report-author').value };
+  const { error } = cleanReport(input);
+  if (error) {
+    $('report-error').textContent = error;
+    $('report-error').hidden = false;
+    return;
+  }
+  const author = input.author.trim();
+  try { if (author) localStorage.setItem(AUTHOR, author); } catch { /* blocked */ }
+  const site = store.fieldSiteOf(reportFor);
+  closeSheet('report-dialog');
+
+  const r = await store.fileReport({ siteId: reportFor, ...input });
+  if (!r.entry) { toast(r.error ?? 'Could not keep that report', { bad: true }); return; }
+  const what = `${STATUS_WORD[input.status]} · ${site?.name ?? 'site'}`;
+  if (r.outcome === 'sent') toast(`Filed: ${what}`, { glyph: 'check' });
+  else if (r.outcome === 'waiting') toast('Report saved — it sends itself when you have signal', { glyph: 'outbox', ms: 3800 });
+  else toast(`Kept, but Supabase refused it — ${r.error}`, { bad: true, ms: 5200 });
+});
+
+function openSiteSheet() {
+  for (const id of ['site-name', 'site-address', 'site-region', 'site-tag', 'site-access',
+    'site-contact', 'site-phone']) $(id).value = '';
+  setRadio('site-priority', '2');
+  $('site-error').hidden = true;
+  openSheet('site-dialog');
+  if (!isNarrow()) requestAnimationFrame(() => $('site-name').focus());
+}
+
+initSheet('site-dialog');
+$('site-close').addEventListener('click', () => closeSheet('site-dialog'));
+
+$('site-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = {
+    name: $('site-name').value,
+    address: $('site-address').value,
+    region: $('site-region').value,
+    asset_tag: $('site-tag').value,
+    priority: radio('site-priority'),
+    access_notes: $('site-access').value,
+    contact_name: $('site-contact').value,
+    contact_phone: $('site-phone').value,
+  };
+  const { error } = cleanSite(input);
+  if (error) {
+    $('site-error').textContent = error;
+    $('site-error').hidden = false;
+    $('site-name').focus();
+    return;
+  }
+  closeSheet('site-dialog');
+
+  const r = await store.addSite(input);
+  if (!r.entry) { toast(r.error ?? 'Could not keep that site', { bad: true }); return; }
+  go(siteHref(r.entry.id));
+  if (r.outcome === 'sent') toast('Site added', { glyph: 'check' });
+  else if (r.outcome === 'waiting') toast('Site saved on this phone — you can file on it now', { glyph: 'outbox', ms: 3800 });
+  else toast(`Kept, but Supabase refused it — ${r.error}`, { bad: true, ms: 5200 });
 });
 
 // A dimmer is the one control here that isn't a tap. `change`, not `input`,
@@ -695,9 +944,10 @@ document.addEventListener('change', (e) => {
 document.addEventListener('keydown', (e) => {
   if ($('app').hidden) return;        // nothing to drive from the sign-in screen
   trapFocus(e);
+  const sheet = ['usage-sheet', 'report-dialog', 'site-dialog'].find(sheetOpen);
 
   if (e.key === 'Escape') {
-    if (sheetOpen('usage-sheet')) { closeSheet('usage-sheet'); return; }
+    if (sheet) { closeSheet(sheet); return; }
     if (drawerOpen()) { closeDrawer(); return; }
     if (!$('opts').hidden) {
       $('opts').hidden = true;
@@ -708,6 +958,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // A sheet is up: nothing behind it moves.
+  if (sheet) return;
   const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -718,6 +970,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'k') { e.preventDefault(); go('#/ask'); focusPrompt(); }
   if (e.key === 'i') { e.preventDefault(); go('#/ideas'); }
   if (e.key === 'p') { e.preventDefault(); go('#/projects'); }
+  if (e.key === 'f') { e.preventDefault(); go('#/field'); }
+  if (e.key === 'o') { e.preventDefault(); go('#/outbox'); }
 });
 
 // password reveal
@@ -771,6 +1025,19 @@ store.on('houseFail', (cmd) => {
   toast(`Could not finish ${what} — ${cmd.error ?? 'the hub refused it'}`,
     { bad: true, ms: 5000 });
   notify('Your house said no', `${what}: ${cmd.error ?? 'refused'}`);
+});
+store.on('sent', ({ landed, failed }) => {
+  // Things that waited — sent while you were doing something else — say so
+  // once. What you just sent has already had its toast.
+  const waited = landed.filter((e) => Date.now() - e.createdAt > 15_000);
+  if (waited.length) {
+    toast(waited.length === 1 ? `Sent — ${firstLine(waited[0].title) || 'one thing that was waiting'}`
+      : `${waited.length} things that were waiting have gone`, { glyph: 'outbox', ms: 3600 });
+  }
+  const refused = failed.filter((e) => Date.now() - e.createdAt > 15_000);
+  if (refused.length) {
+    toast(`Supabase refused ${plural(refused.length, 'thing')} — see the outbox`, { bad: true, ms: 4500 });
+  }
 });
 store.on('finish', (job) => {
   // The host deploys and re-syncs before it marks a job done, so the new repo
@@ -838,8 +1105,39 @@ function storageWorks() {
   }
 }
 
+/**
+ * Opened with no signal and an access token that expired meanwhile: the
+ * client cannot produce a session until it can refresh one, but this phone
+ * still knows whose saved copy and outbox these are. So the app opens on
+ * those, read-only as far as the network is concerned, until a session
+ * turns up — every load stays off, because a read without one would come
+ * back empty (row-level security, not an error) and wipe the saved copy.
+ */
+let savedOnly = false;
+
+async function openSaved(user) {
+  savedOnly = true;
+  $('boot').hidden = true;
+  $('app').hidden = false;
+  $('auth').hidden = true;
+  store.state.sync.online = false;
+  await store.setOwner(user.id);
+  syncRoute();
+  render();
+  clearInterval(tickTimer);
+  tickTimer = startTicker();
+}
+
+/** Back from the saved-only state the moment a session can be had. */
+async function leaveSaved() {
+  const { data } = await store.sb.auth.getSession().catch(() => ({ data: null }));
+  if (data?.session) await applySession(data.session);
+  return Boolean(data?.session);
+}
+
 async function applySession(session) {
   const signedIn = Boolean(session);
+  savedOnly = false;
   $('boot').hidden = true;
   $('app').hidden = !signedIn;
   $('auth').hidden = signedIn;
@@ -859,13 +1157,22 @@ async function applySession(session) {
     return;
   }
 
+  // Whose phone this is: their saved copy goes on screen and their outbox is
+  // read before anything is asked of the network.
+  await store.setOwner(session.user.id);
   syncRoute();
   render();
-  await Promise.all([store.loadAll(route.slug), store.loadAsk(), store.loadHouse()]);
+  await Promise.all([
+    store.loadAll(route.slug), store.loadAsk(), store.loadHouse(), store.loadField(),
+  ]);
   store.subscribe();
   store.pollHost();
+  // Anything left on this phone from last time goes now.
+  store.flushOutbox();
   // Anything left waiting while the app was closed starts now, in the cloud.
   store.wakeCloud({ force: true });
+  // The outbox's retry tick rides it too: flushDue is quiet unless
+  // something is waiting and due.
   // Usage and the agent ceiling ride the same timer as the host. Realtime on
   // `usage_windows` is a bonus; this poll is what keeps the meters honest,
   // and the ceiling can be raised from whichever device is in your hand.
@@ -876,6 +1183,7 @@ async function applySession(session) {
     store.pollAssistant();
     store.pollHub();
     store.wakeCloud();
+    store.flushDue();
   }, 10_000);
   tickTimer = startTicker();
   if (inThread()) scrollToEnd('auto');
@@ -889,30 +1197,49 @@ views.renderTabs();
 initRouter(onRoute);
 
 (async () => {
-  const { data: { session } } = await store.sb.auth.getSession();
-  await applySession(session);
-  store.sb.auth.onAuthStateChange((_evt, s) => applySession(s));
+  const { data } = await store.sb.auth.getSession().catch(() => ({ data: null }));
+  const session = data?.session ?? null;
+  // No session, but an account kept on this phone: no signal, most likely.
+  const kept = session ? null : store.storedUser();
+  if (kept) await openSaved(kept);
+  else await applySession(session);
+  store.sb.auth.onAuthStateChange((_evt, s) => {
+    // While opened on the saved copy, a null here is the client still unable
+    // to refresh — not you signing out — unless the account is gone too.
+    if (savedOnly && !s && store.storedUser()) return;
+    applySession(s);
+  });
 })();
 
 // Realtime drops when a phone sleeps the tab; resync on return.
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !$('app').hidden) {
-    store.loadAll(route.slug);
-    store.loadAsk();
-    store.loadHouse();
-    store.pollHost();
-    store.wakeCloud({ force: true });
-  }
-});
-
-window.addEventListener('online', () => {
-  setOffline(false);
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || $('app').hidden) return;
+  if (savedOnly) { await leaveSaved(); return; }
   store.loadAll(route.slug);
   store.loadAsk();
   store.loadHouse();
+  store.loadField();
+  store.pollHost();
+  store.wakeCloud({ force: true });
+  store.flushOutbox();
 });
-window.addEventListener('offline', () => setOffline(true));
-setOffline(!navigator.onLine);
+
+// The browser's word is a hint; every request corrects it (store.heard).
+window.addEventListener('online', async () => {
+  store.state.sync.online = true;
+  scheduleRender();
+  if ($('app').hidden) return;
+  if (savedOnly) { await leaveSaved(); return; }
+  store.loadAll(route.slug);
+  store.loadAsk();
+  store.loadHouse();
+  store.loadField();
+  store.flushOutbox();
+});
+window.addEventListener('offline', () => {
+  store.state.sync.online = false;
+  scheduleRender();
+});
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then((reg) => {

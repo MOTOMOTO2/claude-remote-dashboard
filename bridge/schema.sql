@@ -1,7 +1,10 @@
--- Talking to your own assistant, relayed through Supabase.
+-- Everything the dashboard can use beyond jobs: your own assistant, the
+-- agent ceiling, your house, field reports, and sending with no signal.
 --
--- Paste this into the Supabase SQL editor once. It adds three tables to the
--- project the dashboard already uses — it changes nothing that is there.
+-- Paste this into the Supabase SQL editor; it is safe to run again whenever
+-- it grows. It adds tables to the project the dashboard already uses, and
+-- the one change to anything already there is a nullable `client_id`
+-- column on `jobs` and `chat_messages` (see "sending later").
 --
 -- Every policy is scoped to auth.uid(), so the publishable key in config.js
 -- can only ever reach your own rows, exactly like jobs and job_events.
@@ -239,3 +242,136 @@ end $$;
 -- A device changing is an UPDATE, and the dashboard needs the whole row.
 alter table house_devices replica identity full;
 alter table house_commands replica identity full;
+
+-- ── sending later ─────────────────────────────────────────────────────
+-- The dashboard keeps what you send on the phone until Supabase has it, and
+-- sends it again when the signal comes back. A retry whose first try got
+-- through — but whose answer was lost on the way back — would otherwise land
+-- twice, so each row carries the id the phone gave it and a second copy is
+-- refused. Nullable: rows the runner, the bridge or an older dashboard write
+-- have none, and that is fine. Without these two columns the dashboard
+-- still sends; a lost answer can just mean a job or a message twice.
+
+alter table jobs add column if not exists client_id text;
+create unique index if not exists jobs_client_id on jobs (client_id);
+
+alter table chat_messages add column if not exists client_id text;
+create unique index if not exists chat_messages_client_id on chat_messages (client_id);
+
+-- ── field reports ─────────────────────────────────────────────────────
+-- Sites to visit and what was found at each — Field Reports
+-- (offline-sync-pwa), moved into this account. A report is written on the
+-- phone first, so it can be filed where there is no signal; its id is made
+-- there too, and is the primary key, so sending it twice keeps one.
+
+create table if not exists field_sites (
+  id             uuid primary key default gen_random_uuid(),
+  owner          uuid not null references auth.users on delete cascade,
+  name           text not null check (char_length(name) between 1 and 200),
+  address        text not null default '',
+  region         text not null default '',
+  asset_tag      text not null default '',
+  priority       int  not null default 2 check (priority between 1 and 3),
+  access_notes   text not null default '',
+  contact_name   text not null default '',
+  contact_phone  text not null default '',
+  status         text not null default 'unvisited'
+                 check (status in ('ok', 'needs_work', 'blocked', 'unvisited')),
+  last_report_at timestamptz,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+create index if not exists field_sites_owner on field_sites (owner, priority, name);
+
+alter table field_sites enable row level security;
+
+drop policy if exists "own sites" on field_sites;
+create policy "own sites" on field_sites
+  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+
+create table if not exists field_reports (
+  id          text primary key check (id ~ '^[A-Za-z0-9_-]{8,64}$'),
+  owner       uuid not null references auth.users on delete cascade,
+  site_id     uuid not null references field_sites on delete cascade,
+  status      text not null check (status in ('ok', 'needs_work', 'blocked')),
+  note        text not null default '' check (char_length(note) <= 2000),
+  author      text not null default '' check (char_length(author) <= 120),
+  recorded_at timestamptz not null default now(),
+  received_at timestamptz not null default now()
+);
+
+create index if not exists field_reports_site on field_reports (site_id, recorded_at desc);
+
+alter table field_reports enable row level security;
+
+-- Your own reports, on your own sites: a report cannot be pinned to a site
+-- that belongs to someone else.
+drop policy if exists "own reports" on field_reports;
+create policy "own reports" on field_reports
+  for all using (auth.uid() = owner)
+  with check (auth.uid() = owner and exists (
+    select 1 from field_sites s where s.id = site_id and s.owner = auth.uid()));
+
+-- The phone's clock is trusted within reason: a report queued this morning
+-- should say this morning, but not next year. `received_at` is the server's.
+create or replace function field_report_stamp() returns trigger
+language plpgsql as $$
+begin
+  if new.recorded_at is null or new.recorded_at > now() + interval '10 minutes' then
+    new.recorded_at := now();
+  end if;
+  new.received_at := now();
+  return new;
+end $$;
+
+drop trigger if exists field_report_stamp on field_reports;
+create trigger field_report_stamp before insert on field_reports
+  for each row execute function field_report_stamp();
+
+-- A site's status is its newest report's — newest by when it was recorded,
+-- not when it arrived — so a report that sat all day on a phone with no
+-- signal cannot overwrite what someone has seen since. Removing a report
+-- works the status out again from the ones left.
+create or replace function field_site_status() returns trigger
+language plpgsql as $$
+declare
+  sid       uuid;
+  latest    text;
+  latest_at timestamptz;
+begin
+  if tg_op = 'INSERT' then
+    update field_sites
+       set status = new.status, last_report_at = new.recorded_at, updated_at = now()
+     where id = new.site_id
+       and (last_report_at is null or last_report_at <= new.recorded_at);
+    return null;
+  end if;
+
+  sid := old.site_id;
+  select r.status, r.recorded_at into latest, latest_at
+    from field_reports r
+   where r.site_id = sid
+   order by r.recorded_at desc, r.received_at desc
+   limit 1;
+  update field_sites
+     set status = coalesce(latest, 'unvisited'), last_report_at = latest_at, updated_at = now()
+   where id = sid;
+  return null;
+end $$;
+
+drop trigger if exists field_site_status on field_reports;
+create trigger field_site_status after insert or delete on field_reports
+  for each row execute function field_site_status();
+
+do $$
+begin
+  alter publication supabase_realtime add table field_sites;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table field_reports;
+exception when duplicate_object then null;
+end $$;
