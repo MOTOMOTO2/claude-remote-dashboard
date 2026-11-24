@@ -45,12 +45,11 @@ and drives Claude Code lives on the PC, in its own repo.
   follow-up continues the project's last Claude session, and a fresh session
   is told what was asked before and what came of it. See
   [How it remembers](#how-it-remembers).
-- **Home** — one hero figure (agents running right now) over the line that says
-  what the lead agent is doing this second, the live runs, the limit that will
-  stop you first, what to do next, and four counts with their context. The rest
-  — the fortnight of runs, the finished jobs, the desktop itself — is one tap
-  behind *More detail* on a phone and the right-hand column on a wide screen.
-  See [Less on screen at once](#less-on-screen-at-once).
+- **A front page that is the fleet** — there is no home screen. `#/` opens
+  Agents: how many are running, then your usage limits with when each resets
+  and how long that is, then every agent with the tail of its own log, what is
+  waiting and why, the ceiling, and the runner. See
+  [Less on screen at once](#less-on-screen-at-once).
 - **Your own assistant, from anywhere** — `#/ask` is the AI you built,
   talked to the way you talk to Claude: threads, Markdown replies, an answer
   that streams in word by word. It runs on your PC and is reachable for
@@ -79,8 +78,9 @@ and drives Claude Code lives on the PC, in its own repo.
   there. See [Several agents at once](#several-agents-at-once).
 - **Suggestions from your own work** — "fix what broke in beta", "put gamma on
   GitHub", "write a README for alpha", each shown with the reason it was
-  offered. Tap one and it opens that project's chat with the prompt loaded; you
-  still press send. See [Where suggestions come from](#where-suggestions-come-from).
+  offered, on the New screen. Tap one and it opens that project's chat with the
+  prompt loaded; you still press send. See
+  [Where suggestions come from](#where-suggestions-come-from).
 - **An Ideas screen full of things to build** — `#/ideas` is the long version:
   every next step for what you already have, plus whole new projects derived
   from the kinds of thing you build. It opens by showing you what it read —
@@ -94,12 +94,16 @@ and drives Claude Code lives on the PC, in its own repo.
   recent or A–Z. A web project built from here is put on Fly.io when its run
   finishes, so its link shows up without you doing anything.
   See [Where the projects come from](#where-the-projects-come-from).
-- **Limits that say *when*** — a meter per window with the percentage, the
-  headroom left, the severity in a word, and the reset as a **day and a time**
-  with a live countdown: "resets Sat 6:20 p.m. · in 2d 19h". The tightest window
-  also rides in the topbar, so a weekly cap is never a surprise. The block says
-  when it last read and when the numbers last moved, because a stuck meter and
-  a quiet account look identical otherwise.
+- **Limits that say *when* and *how long*** — a meter per window with the
+  percentage used, the headroom left and the severity in a word, and under the
+  bar the reset as a **day and a time with a live countdown**: "Resets Fri
+  7:27 AM · in 2d 19h". The tightest window rides in the topbar on every screen
+  as a ring and two figures — "88% · 2d 19h" — and tapping it opens a sheet
+  with every window. A reading with no reset ahead of it says *why* rather than
+  "unknown": *starts with your next message*, *reset 2h ago — waiting for a new
+  reading*, or *reset time not reported*. The block says when it last read and
+  when the numbers last moved, because a stuck meter and a quiet account look
+  identical otherwise. See [Your usage limits](#your-usage-limits).
 - **A chat per project** — your prompts and the agent's replies in one thread,
   with its summary rendered as Markdown, a live log while it works, and a folded
   log once it's done. Each reply carries the facts it ran with — effort, usage
@@ -116,7 +120,9 @@ and drives Claude Code lives on the PC, in its own repo.
   server is involved; nothing is sent anywhere.
 - **Light and dark** — follows the system by default, with a three-way switch in
   the sidebar footer. Both themes were picked for contrast, not inverted, and
-  `npm run contrast` fails the build if one of them stops clearing it.
+  `npm run contrast` fails the build if one of them stops clearing it. The look
+  is flat on purpose — a surface and a hairline, grouped lists, sentence case —
+  so a screen has fewer edges to read around.
 - **Installable** — a PWA with an offline shell, so it opens instantly and still
   shows the last synced state with no signal.
 
@@ -808,23 +814,71 @@ setting ignores it and keeps working one job at a time; you would see the
 queue stack up behind it on this screen, which is the honest picture either
 way.
 
+## Your usage limits
+
+The question this answers is "when does it reset, and how long do I have?" —
+and the old answer to it, when a reading had no reset ahead of it, was
+"reset time unknown". That sentence covered four different situations, and one
+of them was a red "nearly out" over a window that had already reset.
+`usage.js` is the rule for telling them apart, pure and unit-tested, because a
+plausible-looking wrong answer is worse here than a crash:
+
+| A reading is | When | The meter says |
+|---|---|---|
+| **live** | its reset is ahead of us | **Resets Fri 7:27 AM · in 2d 19h**, and ticks. The only one that is still a limit |
+| **not started** | 0% used and no reset time | *Starts with your next message*, and how long it will last: Anthropic opens a window with your next message, so there is nothing to count down to — and nothing to fear |
+| **reset** | its reset has already passed | *Reset 10:48 AM · 2h ago — waiting for a new reading*, with the old figure marked *was 88%*. It is not drawn as nearly out, and it claims no headroom from a number that is out of date |
+| **not reported** | some use, no reset time | *Reset time not reported* — said plainly, with the severity it may well have |
+
+`host/dispatch.mjs` already ignores a window whose reset has passed when it
+decides whether a job may start, so the screen and the runner now agree about
+whether you are capped. The window that will stop you is the most used of those
+that still bind you, and between two level ones the one that clears first.
+
+The reset is parsed from an ISO string, epoch seconds, epoch milliseconds, or
+either as text, because `usage_windows` is written by the runner in another
+repo and this one cannot see its column type. A stored `0` is *no time*, not
+the first of January 1970.
+
+It is on screen in three places, and always as the same meter: on the front
+page right under the running count; in the **chip** in the topbar — a ring for
+how much is used and the countdown beside it, `88% · 2d 19h`, coloured by
+severity, with the whole sentence as its title and accessible name — and in the
+**sheet** that chip opens, which leads with that sentence and lists every
+window. The desktop sidebar carries a compact copy on every screen but the
+front page, which already has them, and the New screen shows them above the
+composer, because what you have left is worth knowing before you send a job.
+
 ## Less on screen at once
 
-The phone was carrying eight stacked blocks on home and a drawer as the only
-way between screens. What changed:
+The phone used to carry a home screen of eight stacked blocks, a drawer as the
+only way between screens, and seven bottom tabs. What it is now:
 
-- **Bottom tabs on narrow screens** — Home · Agents · New · Projects · Ideas.
-  They own the bottom of the window on every view you don't type into, and
-  step aside for the composer on the two you do, so the two never stack up.
-- **Home leads rather than lists.** Three live rows and a door to the rest.
-  The limits block leads with the window that will actually stop you and folds
-  the others behind their own count. The activity strip, the finished runs and
-  the desktop card sit behind one *More detail* toggle.
-- **Tighter under 600px** — a smaller hero figure, denser tiles, less padding
-  everywhere, two log lines on an agent card instead of three.
+- **There is no Home.** `#/` — and any old bookmark to it — opens Agents, which
+  answers "what is happening" with the running count and the slots, then "what
+  do I have left" with the limits, then every agent in flight. What used to
+  live on Home either has a screen of its own (the assistant, the house, the
+  suggestions on New and Ideas) or went with it: the four counts and the
+  fortnight strip were reference-only, one tap behind *More detail*, and are in
+  git history if you want them back.
+- **Five bottom tabs** — Agents · Ask · **New** · House · Projects — each an
+  icon in the same pill, the current one tinted and New always filled, since it
+  is the one action rather than a place. They own the bottom of the window on
+  every view you don't type into, and step aside for the composer on the ones
+  you do. Ideas is in the menu and one tap from the New screen it grew out of.
+- **Flat.** A surface and a hairline instead of a shadow under everything;
+  shadows are for what floats. A list of rows is one grouped surface with lines
+  between. Labels are sentence case and nothing is under 11px. The facts under
+  a message are plain words with dots rather than a row of chips, and the
+  buttons under it are quiet pills. The assistant's replies are unboxed text,
+  the way a chat app draws them.
+- **Settings sit below the work.** *How many at once* used to be the second
+  thing on the Agents screen, above the agents; it is now under them, and the
+  runner's state is under that.
 
-Nothing was dropped to make room. A wide screen still opens with all of it, as
-the two-column dashboard it was; everything else is one tap away.
+Nothing a wide screen showed is gone from it except the Home blocks above: the
+sidebar is a list of the same five doors plus Ideas, and the fleet is two
+columns of cards.
 
 ### Measuring it, instead of squinting at it
 
@@ -834,7 +888,7 @@ text looks exactly like one that fits.
 
 ```sh
 npm run mobile              # every view at 390px
-npm run mobile home 320     # one view, one width
+npm run mobile agents 320   # one view, one width
 ```
 
 `tools/mobile-audit.mjs` renders each screen with the preview tool, re-opens
@@ -848,6 +902,14 @@ the frozen file in headless Chrome with a probe appended, and reports:
 | content left under the bottom bar | the last row you can never reach |
 | tap targets under 40px | counting any hit area grown with `::after`, so a dense control that is still catchable is not a finding |
 | controls whose own middle belongs to something else | the fix for the line above, overdone |
+
+With a sheet open it measures only what is inside the sheet — the page behind
+a modal is inert and meant to be covered, so reporting it as covered would be
+noise — and it skips text that is there for a screen reader and drawn for no
+one (a 1px, clipped heading is not content that was cut off). `sheet` is the
+front page with the usage sheet open, and `limits` is the three readings that
+have no reset ahead of them, so the states that need the most words are
+measured too.
 
 It finds the browser itself — Playwright's Chromium, Chrome, or Edge,
 whichever is installed — or takes `CHROME=`. There is no new dependency.
@@ -872,6 +934,18 @@ What it caught, and what changed in answer:
   the size they look and stretch an invisible `::after` instead, so the screens
   stay as dense as they were.
 
+- **The tab-count badge overflowed its tab by 4px** once there were five tabs
+  of 76px. It is measured border-box now, so two digits still fit.
+
+What it cannot see is *how the text breaks*, because wrapping inside a box that
+is wide enough is not overflow. Two things only showed up in a screenshot at
+320px: a meter heading that broke "Weekly · all / models" and "nearly / out"
+across lines (below 380px the severity word now drops under the name instead),
+and a "last read now · unchanged so far" line that broke into a column because
+each of its text runs was its own flex item. Look at it, as well as measuring
+it — `npm run preview -- agents mobile` and a screenshot is the README's
+recipe for that, below.
+
 Every view is clean at 390px and 320px.
 
 ## Where suggestions come from
@@ -894,9 +968,9 @@ probe over every prompt and summary) and runs the recipes against it:
 
 A run that dies because Claude Code on the desktop is signed out ("Failed to
 authenticate: OAuth session expired…") is not the project's fault, so no fix is
-offered for it. Instead the chat says so, home shows a *desktop signed out*
-chip until a later run finishes, and the toast says what to do: run `claude`
-on the PC, `/login`, then *run again*.
+offered for it. Instead the chat says so, the front page shows a *desktop
+signed out* chip until a later run finishes, and the toast says what to do: run
+`claude` on the PC, `/login`, then *run again*.
 
 A project with a job in flight is skipped — it's already busy. No project
 contributes more than two, the list round-robins so the first screenful spans
@@ -985,13 +1059,16 @@ npm run contrast    # just the colour claims
 ```
 
 Boots the real app in jsdom against a fake Supabase and walks the screens: sign
-in, home, a project thread, sending a follow-up, stopping a run, a job finishing
-over realtime, the new-project flow, the agents view (a second agent arriving
-mid-watch, a live log line landing on its card, the ceiling changed from another
-device and published from this one, a job queued behind its own project, stop
-all), the phone layout (home folding its reference blocks, the limits block
-leading with the tightest window, tabs and composer never sharing the bottom of
-the window), the assistant screen (an answered thread, sending a message, the answer
+in and landing on the fleet, the limits (every meter saying when it resets, a
+window that has not started, one already reset, one never reported, a re-read, a
+failed read that keeps the last good numbers, the chip, and the sheet it opens —
+closed by its button, Escape, and a tap on the page behind it), a project
+thread, sending a follow-up, stopping a run, a job finishing over realtime, the
+new-project flow, the agents view (a second agent arriving mid-watch, a live log
+line landing on its card, the ceiling changed from another device and published
+from this one, a job queued behind its own project, stop all), the phone layout
+(five tabs, every limit on the page and none folded away, tabs and composer
+never sharing the bottom of the window), the assistant screen (an answered thread, sending a message, the answer
 streaming in and finishing, a PC that is switched off, a reply queued behind
 another, an answer that failed, a bridge that has never checked in, a schema
 that predates the feature — and the setup card offering the SQL, the editor for
@@ -1005,10 +1082,14 @@ referenced is in the sprite, every module is listed in the service-worker shell,
 and the recurring timer still re-reads usage (it stopped once, and nothing else
 in here would have noticed).
 
-Seven things get unit coverage against fixed inputs rather than fixtures,
+Eight things get unit coverage against fixed inputs rather than fixtures,
 because a plausible-looking wrong answer is worse there than a crash: the reset
 labels (`dayClock`, `until`, `span` — a weekly limit must never claim it resets
-this afternoon), the suggestion engine (a busy project is left alone, a lost one
+this afternoon, and 59m40s is an hour, not "60m"), the limits model (`usage.js`:
+a reset parsed from an ISO string, epoch seconds or milliseconds, or text; a
+reset in the past is stale and not nearly out; no reset and nothing used has not
+started; the tightest is the most used of what still binds you; the chip and
+the sentence say when *and* how long), the suggestion engine (a busy project is left alone, a lost one
 is never offered, the list spans your projects, a live one is not asked to
 deploy), the idea engine (a theme is only claimed when the words are there, a
 combo needs both halves, openers never pad out a list that has real ideas) and
@@ -1028,10 +1109,12 @@ line it cannot parse kept as prose rather than dropped).
 `npm run contrast` is the other half of the net. It parses the tokens out of
 `style.css` and asserts the claims this README makes about them: every ink
 clears 4.5:1 on each surface it is actually set on, every mark — status dot,
-meter fill, chart bar — clears 3:1, the two dark scopes (OS preference and the
+meter fill, the ring — clears 3:1, the two dark scopes (OS preference and the
 theme toggle) agree token for token, and nothing in the brand or status ramp
 sits in the orange band. It is not decoration: it caught a status dot at 2.96:1
-and chart bars at 1.6:1 when this palette went in.
+and chart bars at 1.6:1 when this palette went in. (It once read the
+system-preference block twice and called that the two scopes agreeing; it now
+reads each block by its full selector.)
 
 `test/bridge.mjs` is the third part, and it runs the real thing: it starts a
 server that answers the way PostgREST does, runs `bridge/bridge.mjs --once`
@@ -1043,7 +1126,8 @@ with "(stopped)" rather than as a failure; an assistant that exits non-zero
 leaves the reply in `error` with its own stderr in it; and with nothing
 queued the bridge still checks in before it stops. It runs `keep-up.mjs` the
 same way: a bridge that stops is started again, its output lands in the log,
-and killing the keeper takes the bridge with it. And `tools.mjs`, against a
+and — on Windows, where Node puts a spawned child in a job that dies with its
+parent — killing the keeper takes the bridge with it. And `tools.mjs`, against a
 fake with plain tables: the status names the latest failure and why,
 `queue_job` writes the New screen's row and refuses a project that does not
 exist, and a table the account never made reads as "none yet". Deleting the status filter
@@ -1069,7 +1153,10 @@ these checks fail.
 
 The Supabase CDN import is swapped for a local fake by a Node module loader
 (`test/loader.mjs`), so the app runs in the test exactly as the browser loads
-it — there is no test-only seam in the app code.
+it — there is no test-only seam in the app code. `tick()` in the harness waits
+for the animation frames the app has asked for rather than sleeping a fixed
+time: a thread takes two renders (the route, then its log), and on a slow
+machine a flat 60ms ended before the second one.
 
 `test/host.mjs` does for the cloud runner what `test/bridge.mjs` does for the
 bridge: the real code against stand-ins. `plan` and every word Claude is told
@@ -1087,24 +1174,29 @@ resumed in the same thread.
 ## Looking at the design
 
 ```sh
-npm run preview -- home dark
+npm run preview -- agents dark
 ```
 
 Renders one screen against the test fixtures and freezes it to
 `preview/<view>-<theme>.html`, which you can open or screenshot without a
-Supabase project at all. Views: `home`, `agents`, `ask`, `chat`, `new`,
-`ideas`, `projects`, `auth`, `empty`, and `setup` — the assistant screen as an
-account that has not run the migration sees it. `house` draws the two-relay
-case on purpose: the hub relaying, the desktop asleep for an hour and a half,
-and the house still online. Themes: `light`, `dark`,
-`mobile`. (`preview/` is gitignored.)
+Supabase project at all. Views: `agents` (the front page), `sheet` (the same
+with the usage sheet open), `limits` (the three readings that have no reset
+ahead of them: not started, already reset, never reported), `ask`, `chat`,
+`new`, `ideas`, `projects`, `auth`, `empty`, and `setup` — the assistant screen
+as an account that has not run the migration sees it. `house` draws the
+two-relay case on purpose: the hub relaying, the desktop asleep for an hour and
+a half, and the house still online. Themes: `light`, `dark`, `mobile` and
+`mobile-dark`. (`preview/` is gitignored.)
 
 To screenshot one headlessly:
 
 ```sh
-chrome-headless-shell --headless --hide-scrollbars --force-device-scale-factor=2 \
-  --window-size=390,844 --screenshot=home.png preview/home-mobile.html
+chrome-headless-shell --headless --hide-scrollbars --virtual-time-budget=3000 \
+  --force-device-scale-factor=2 --window-size=390,844 --screenshot=agents.png \
+  preview/agents-mobile.html
 ```
+
+(`--virtual-time-budget` lets the sheet's slide-up finish before the shot.)
 
 `chrome-headless-shell` — Playwright ships one, under
 `~/AppData/Local/ms-playwright/chromium_headless_shell-*/` on Windows — does
@@ -1120,22 +1212,23 @@ instead of looking at it; `tools/mobile-audit.mjs` is that trick, written down.
 | `style.css` | The design system: tokens, layout, components |
 | `app.js` | Entry point — boot, auth, view switching, composer, shortcuts |
 | `store.js` | Supabase client, the in-memory mirror, realtime, mutations |
-| `views.js` | Rendering. Reads state, writes DOM; never queries |
+| `views.js` | Rendering. Reads state, writes DOM; never queries. The front page is `renderAgents` |
 | `fleet.js` | Slots, what holds them, and what each queued job waits for. Pure |
 | `assistant.js` | Your assistant: presence, where a reply is, conversations. Pure |
+| `usage.js` | Your limits: what a reading means, when it resets, what the chip and the sentence say. Pure |
 | `house.js` | Your house: what a device is, what you can do to it, where a tap is. Pure |
 | `suggest.js` | The next step for a project you have, read off its thread. Pure |
 | `ideas.js` | Whole new projects, read off the themes your work shows. Pure |
 | `catalog.js` | The Projects screen's model: every project, its runs, its live link. Pure |
 | `router.js` | Hash routing |
-| `ui.js` | Theme, drawer, toasts, confirm dialog, the one-second ticker |
+| `ui.js` | Theme, drawer, sheets, toasts, confirm dialog, the one-second ticker |
 | `md.js` | A small Markdown subset, escape-first so output is safe |
 | `util.js` | Escaping, time and text helpers |
 | `sw.js` | Service worker: caches the app shell, never Supabase traffic |
 | `test/bridge.mjs` | Runs the real bridge against a stand-in for PostgREST |
 | `tools/contrast.mjs` | Asserts the colour claims against `style.css` |
 | `tools/icon.mjs` | Redraws `icon.png` from the brand geometry |
-| `tools/preview.mjs` | Freezes one screen to static HTML for a look |
+| `tools/preview.mjs` | Freezes one screen to static HTML for a look — including the open sheet and the three limit states |
 | `tools/mobile-audit.mjs` | Measures the narrow layout in a real browser: what is cut off, what is unreachable |
 | `tools/serve.mjs` | The static server — in development and in the container |
 | `bridge/bridge.mjs` | The PC half: claims what you asked, streams the answer back |
@@ -1204,12 +1297,7 @@ house that has stopped answering.
   channel. Same for meters: a severity word rides next to the fill.
 - A ratio against a limit is a **meter**, not a chart: the fill carries
   severity, the track is a lighter step of the same ramp, and the percentage,
-  the headroom and the reset day are all written out beside it.
-- The **runs-per-day strip** is one series, so it gets no legend: the heading
-  names it and totals it, today is the only coloured column, and the busiest
-  day is the only one labelled. Bars cap at 24px with a 2px surface gap, a 4px
-  rounded data end, and a hover title per day. Its neutral is a token (`--bar`)
-  held to the same 3:1 as any other mark.
+  the headroom, the reset day and the countdown are all written out around it.
 - One hero figure per view, in proportional figures; `tabular-nums` is reserved
   for columns of numbers that have to line up.
 - Every text colour clears 4.5:1 on the surface it sits on in both themes, and
@@ -1260,11 +1348,12 @@ house that has stopped answering.
   until the PC is off: then a message you sent has nothing to show for
   itself. Writing it with the question means the thread can say *waiting for
   your PC* instead of looking like it was never sent.
-- **Six tabs, not five.** Five is the convention and one of these could have
-  been demoted to the drawer instead. But the assistant is the thing you
-  reach for with a phone in your hand, and burying it behind a slide-out
-  would have made "always accessible" quietly untrue. The labels elide and
-  shrink below 390px rather than anything being dropped.
+- **Five tabs, and Ideas in the menu.** Five is the convention, and with Home
+  gone there were six left to fit. Ideas is the one that goes: it is a
+  destination you browse rather than reach for with a phone in your hand, and
+  the New screen it grew out of links straight to it. The assistant stays on
+  the bar — burying it behind a slide-out would have made "always accessible"
+  quietly untrue.
 - **`bridge/setup.mjs` does not run the SQL.** It could ask for a service-role
   key or a database password and do the migration itself. That would mean one
   more credential on disk, with permission to drop tables, to save one paste —
@@ -1295,15 +1384,35 @@ house that has stopped answering.
   meant two taps and a slide for every screen. The tabs cost a strip at the
   bottom of the views that have no composer — and on the two that do, the
   composer is the more useful thing to have under your thumb.
-- **Home folds rather than drops.** Every block that moved behind *More
-  detail* is still rendered, still one tap away, and still open by default on
-  a wide screen. Hiding a number because the screen is small is how a
-  dashboard starts lying by omission.
+- **Home went away rather than being folded.** An earlier pass folded its
+  reference blocks behind a toggle, on the principle that hiding a number
+  because the screen is small is how a dashboard starts lying by omission. Then
+  it was asked for by name to go, and the principle still held for the parts
+  that matter: the limits moved to the front page and the chip, what was
+  running was already the Agents screen, and the assistant, house and
+  suggestions each have a screen of their own. What was dropped is only what
+  was reference — four counts and a fourteen-day strip — and it is in git
+  history (`git log -- views.js`) for anyone who misses it.
+- **Limits never say "unknown".** A reading with no reset time ahead of it used
+  to print that, over a red bar, whether the window had not started, had
+  already reset, or just was not reported. Those are three different answers to
+  "how long do I have", so each says its own — see
+  [Your usage limits](#your-usage-limits). The cost is four states to keep
+  honest instead of one string, which is why `usage.js` is pure and tested.
+- **A sheet, not a toast.** Tapping the usage chip used to toast one sentence
+  for five seconds. A reset is a day and a time and a countdown, and five
+  seconds is not long enough to read it, let alone compare two windows. The
+  sheet stays until you close it and shows all of them; the chip stays small
+  because it only has to carry two figures.
+- **Flat rather than boxed.** Every card used to have a border and a shadow and
+  most had a tinted label, so a screen was a pile of outlined things. Now a
+  surface has a hairline and shadows are for what floats, a list of rows is one
+  grouped surface, and the small print is sentence case at 12px and up. It is
+  the same information in fewer edges — which is the only sense in which this
+  was asked to be "sleeker".
 - **Dates follow the browser's locale** (`toLocaleDateString`), so a reset
   reads "Sat 6:20 p.m." or "Sa 18:20" depending on the phone. The weekday is
   shown for anything two to six days out, a date beyond that.
-- **The 14-day window** on the activity strip is fixed; it is the span that
-  fits a phone at a 24px bar cap without becoming a scrubber.
 - **The house relay moved to the hub rather than the house getting a tunnel.**
   "Reach it without being on my wifi" has two conventional answers: expose
   the hub (a forwarded port, a reverse proxy, or a paid subscription), or put

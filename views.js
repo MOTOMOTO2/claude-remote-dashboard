@@ -256,15 +256,22 @@ function resetHtml(r) {
   }
   if (r.state === 'idle') {
     // Not unknown: Anthropic opens a window with your next message, so there
-    // is no clock running yet. The useful answer is how long you will have.
-    return `<span class="meter-reset">Starts with your next message${
-      r.span ? ` <span class="sep">·</span> lasts ${esc(spanWords(r.span))}` : ''}</span>`;
+    // is no clock running yet. The useful answer is how long you will have,
+    // which meterHtml puts where the headroom goes.
+    return '<span class="meter-reset">Starts with your next message</span>';
   }
   if (r.state === 'stale') {
     return `<span class="meter-reset">Reset <b>${esc(w.clock)}</b>
       <span class="sep">·</span> ${esc(w.ago)} — waiting for a new reading</span>`;
   }
   return '<span class="meter-reset">Reset time not reported</span>';
+}
+
+/** What is left: a share of it — or, for a window yet to start, how long it will last. */
+function headroomHtml(r) {
+  if (r.state === 'stale') return '';          // a number that is out of date has no headroom
+  if (r.state === 'idle' && r.span) return `<span class="meter-left">lasts ${esc(spanWords(r.span))}</span>`;
+  return `<span class="meter-left">${r.left}% left</span>`;
 }
 
 /**
@@ -288,7 +295,7 @@ function meterHtml(r) {
         </div>
         <div class="meter-foot">
           ${resetHtml(r)}
-          ${r.left == null ? '' : `<span class="meter-left">${r.left}% left</span>`}
+          ${headroomHtml(r)}
         </div>
       </div>`;
 }

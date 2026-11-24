@@ -5,8 +5,10 @@
 //   node --import ./test/register.mjs tools/preview.mjs agents dark
 //
 // Writes preview/<view>-<theme>.html.
-// Views: agents · sheet · ask · house · chat · new · ideas · projects · auth ·
-// empty · setup. `sheet` is the front page with the usage sheet open.
+// Views: agents · sheet · limits · ask · house · chat · new · ideas · projects ·
+// auth · empty · setup. `sheet` is the front page with the usage sheet open;
+// `limits` is the three readings that have no reset time ahead of them — one
+// not started, one already reset, one that was never reported.
 // Themes: light · dark · mobile · mobile-dark.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -15,7 +17,7 @@ import { seed, makeWindow, tick, root, iso } from '../test/harness.mjs';
 
 const [view = 'agents', theme = 'light'] = process.argv.slice(2);
 const HASH = {
-  agents: '#/agents', sheet: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
+  agents: '#/agents', sheet: '#/agents', limits: '#/agents', ask: '#/ask', chat: '#/p/alpha', new: '#/new',
   ideas: '#/ideas', projects: '#/projects', house: '#/house',
   auth: '#/', empty: '#/', setup: '#/ask',
 };
@@ -29,6 +31,14 @@ if (!(view in HASH)) {
 seed();
 if (view === 'empty') {
   for (const table of Object.keys(fake.tables)) fake.tables[table] = [];
+}
+// The honest ways a reading can have no reset ahead of it, side by side.
+if (view === 'limits') {
+  fake.tables.usage_windows = [
+    { window_type: 'five_hour', pct: 0, resets_at: null },
+    { window_type: 'seven_day', pct: 88, resets_at: iso(120) },
+    { window_type: 'seven_day_opus', pct: 65, resets_at: null },
+  ];
 }
 // An account whose schema predates the assistant: the screen that has to
 // talk you through setting it up rather than just naming a file.
