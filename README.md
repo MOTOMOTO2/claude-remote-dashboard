@@ -301,6 +301,7 @@ after you say yes. Run it again whenever; it only asks about what is missing.
 | `CLAUDE_CODE_OAUTH_TOKEN` | a year-long token for your Claude subscription | `claude setup-token` |
 | `GH_TOKEN` | clone, push, create repos | `gh auth token`, or a classic token with `repo` |
 | `GITHUB_OWNER` | your GitHub account | `gh` |
+| `GIT_NAME`, `GIT_EMAIL` | optional: who commits. Without them, work is committed as the GitHub account behind `GH_TOKEN`, with its private noreply address | your choice |
 | `RUNNER_SECRET`, `CRON_SECRET` | how sandboxes and the cron prove themselves | generated |
 | `OWNER_NAME` | what Claude calls you | optional |
 

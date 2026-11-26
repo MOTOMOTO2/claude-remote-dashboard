@@ -17,6 +17,8 @@ import { join } from 'node:path';
 
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
+export const NO_ATTRIBUTION = { includeCoAuthoredBy: false, attribution: { commit: '', pr: '' } };
+
 /** The flags for one run. Exported so the tests can check them. */
 export function claudeArgs({ resume, model, effort, systemFile, partial = false } = {}) {
   const args = [
@@ -27,6 +29,10 @@ export function claudeArgs({ resume, model, effort, systemFile, partial = false 
     // in is the boundary, which is what this mode is documented for.
     '--permission-mode', 'bypassPermissions',
     '--permission-prompts', 'none',
+    // The work is committed as the account owner: no "Co-Authored-By" trailer
+    // and no "Generated with" line. includeCoAuthoredBy is the older name of
+    // the setting, attribution the newer one; each version reads its own.
+    '--settings', JSON.stringify(NO_ATTRIBUTION),
   ];
   if (partial) args.push('--include-partial-messages');
   if (resume) args.push('--resume', resume);

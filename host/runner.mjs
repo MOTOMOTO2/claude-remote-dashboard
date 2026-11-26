@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connect, loadDotEnv, NO_TABLE } from '../bridge/env.mjs';
 import { runClaude, failure } from './claude.mjs';
-import { makeGit, makeGitHub, gitAuthEnv } from './git.mjs';
+import { makeGit, makeGitHub, gitAuthEnv, gitIdentityEnv, identityFor } from './git.mjs';
 import {
   clip, slugify, jobSystemPrompt, jobPrompt, describeTool, usageRow, resumeAt,
   hitLimit, lostSession, chatSystemPrompt, chatPrompt, seedMemory,
@@ -56,6 +56,8 @@ const CONFIG = {
   lingerMs: Number(env.CHAT_LINGER_MIN || 5) * 60_000,
   ownerName: env.OWNER_NAME || '',
   assistantName: env.ASSISTANT_NAME || 'Claude',
+  /** Who commits; filled in from GitHub (or GIT_NAME / GIT_EMAIL) at startup. */
+  identity: null,
 };
 
 const BEAT_MS = 10_000;
@@ -72,7 +74,7 @@ const stamp = () => new Date().toISOString();
 
 const sb = connect(env);
 const { api } = sb;
-const git = makeGit({ token: CONFIG.ghToken });
+const git = makeGit({ token: CONFIG.ghToken, identity: () => CONFIG.identity });
 const github = makeGitHub({ token: CONFIG.ghToken, api: CONFIG.ghApi });
 
 // ── small persistent state, on the sandbox's own disk ─────────────────
@@ -149,7 +151,13 @@ async function callHome(action, extra = {}) {
  * git gets your GitHub token as a header so clones and fetches just work.
  */
 function claudeEnv({ forChat = false } = {}) {
-  const out = { ...env, ...gitAuthEnv(CONFIG.ghToken), GIT_TERMINAL_PROMPT: '0' };
+  const out = {
+    ...env,
+    ...gitAuthEnv(CONFIG.ghToken),
+    // Claude's own commits are authored as you, not as whatever this machine says.
+    ...gitIdentityEnv(CONFIG.identity),
+    GIT_TERMINAL_PROMPT: '0',
+  };
   delete out.RUNNER_SECRET;
   delete out.GH_TOKEN;
   delete out.GITHUB_TOKEN;
@@ -169,6 +177,14 @@ async function githubOwner() {
   const me = await github.user().catch(() => null);
   CONFIG.ghOwner = me?.login ?? '';
   return CONFIG.ghOwner;
+}
+
+/** Ask GitHub once who the token belongs to, for the owner and the commit identity. */
+async function resolveIdentity() {
+  const me = env.GIT_NAME && env.GIT_EMAIL ? null : await github.user().catch(() => null);
+  CONFIG.identity = identityFor(me, env);
+  if (!CONFIG.ghOwner && me?.login) CONFIG.ghOwner = me.login;
+  log(CONFIG.identity ? `committing as ${CONFIG.identity.name}` : 'no commit identity: git config decides');
 }
 
 /** Where a project's code is: its GitHub repo, or nowhere this runner can reach. */
@@ -606,6 +622,8 @@ if (!sb.owner) {
   console.error('Could not tell whose dashboard this is: set OWNER_ID.');
   process.exit(1);
 }
+
+await resolveIdentity();
 
 if (jobAt >= 0) {
   const id = args[jobAt + 1];

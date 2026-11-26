@@ -35,7 +35,7 @@ export function runnerEnv(env, extra = {}) {
     'SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'OWNER_ID', 'OWNER_NAME',
     'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GH_TOKEN', 'GITHUB_OWNER',
     'RUNNER_SECRET', 'JOB_MODEL', 'CHAT_MODEL', 'SESSION_DAYS', 'CHAT_LINGER_MIN',
-    'ASSISTANT_NAME', 'HOST_NAME',
+    'ASSISTANT_NAME', 'HOST_NAME', 'GIT_NAME', 'GIT_EMAIL',
   ];
   const out = {};
   for (const k of keep) if (env[k]) out[k] = String(env[k]).trim();

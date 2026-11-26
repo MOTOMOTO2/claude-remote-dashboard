@@ -20,11 +20,41 @@ export function gitAuthEnv(token) {
   };
 }
 
-export function makeGit({ token = '', env = process.env } = {}) {
-  const base = { ...env, ...gitAuthEnv(token), GIT_TERMINAL_PROMPT: '0' };
+/** Environment that makes git author and commit as `identity`; nothing without one. */
+export function gitIdentityEnv(identity) {
+  if (!identity?.name || !identity?.email) return {};
+  return {
+    GIT_AUTHOR_NAME: identity.name,
+    GIT_AUTHOR_EMAIL: identity.email,
+    GIT_COMMITTER_NAME: identity.name,
+    GIT_COMMITTER_EMAIL: identity.email,
+  };
+}
+
+/**
+ * Who the work is committed as: GIT_NAME / GIT_EMAIL when set, otherwise the
+ * GitHub account behind the token, with its private noreply address. That
+ * address links each commit to the profile without publishing an email.
+ */
+export function identityFor(user, env = process.env) {
+  const name = String(env.GIT_NAME || user?.name || user?.login || '').trim();
+  const email = String(
+    env.GIT_EMAIL || (user?.id && user?.login ? `${user.id}+${user.login}@users.noreply.github.com` : ''),
+  ).trim();
+  return name && email ? { name, email } : null;
+}
+
+/** `identity` may be a function, so it can be filled in after the runner asks GitHub. */
+export function makeGit({ token = '', env = process.env, identity = null } = {}) {
+  const base = () => ({
+    ...env,
+    ...gitAuthEnv(token),
+    ...gitIdentityEnv(typeof identity === 'function' ? identity() : identity),
+    GIT_TERMINAL_PROMPT: '0',
+  });
 
   const run = (args, cwd) => new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, env: base, maxBuffer: 20e6 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, env: base(), maxBuffer: 20e6 }, (err, stdout, stderr) => {
       if (err) {
         const why = String(stderr || err.message).trim().split('\n').slice(-3).join(' · ');
         reject(new Error(`git ${args[0]}: ${why}`));

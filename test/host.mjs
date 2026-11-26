@@ -26,7 +26,7 @@ import {
 import { claudeArgs } from '../host/claude.mjs';
 import { plan, dispatch, overCap, localOnly, sandboxName, uniqueSlug, awakePc } from '../host/dispatch.mjs';
 import { runnerEnv, runnerSource, makeSandboxes, BOOT } from '../host/sandboxes.mjs';
-import { gitAuthEnv } from '../host/git.mjs';
+import { gitAuthEnv, gitIdentityEnv, identityFor } from '../host/git.mjs';
 import { fleet } from '../fleet.js';
 import { replyState } from '../assistant.js';
 
@@ -118,6 +118,21 @@ ok('a session is resumed by id', flags[flags.indexOf('--resume') + 1] === 's1');
 ok('the effort is passed through', flags[flags.indexOf('--effort') + 1] === 'xhigh');
 ok('an unknown effort is not', !claudeArgs({ effort: 'extreme' }).includes('--effort'));
 ok('never bare: bare skips CLAUDE.md and the subscription', !flags.includes('--bare'));
+const settings = JSON.parse(flags[flags.indexOf('--settings') + 1] ?? '{}');
+ok('no co-author trailer on commits', settings.includeCoAuthoredBy === false && settings.attribution?.commit === '');
+
+// ── who commits ───────────────────────────────────────────────────────
+
+const me = { id: 42, login: 'octo', name: 'Octo Cat', email: 'octo@example.com' };
+ok('commits as the GitHub account, by name', identityFor(me, {})?.name === 'Octo Cat');
+ok('with the private noreply address, not the public one',
+  identityFor(me, {})?.email === '42+octo@users.noreply.github.com');
+ok('a nameless account falls back to its login', identityFor({ id: 1, login: 'x' }, {})?.name === 'x');
+ok('GIT_NAME and GIT_EMAIL win', identityFor(me, { GIT_NAME: 'A', GIT_EMAIL: 'a@b.c' })?.email === 'a@b.c');
+ok('no account and no override: no identity', identityFor(null, {}) === null);
+const idEnv = gitIdentityEnv({ name: 'Octo Cat', email: 'o@x' });
+ok('author and committer are both set', idEnv.GIT_AUTHOR_NAME === 'Octo Cat' && idEnv.GIT_COMMITTER_EMAIL === 'o@x');
+ok('no identity sets nothing', Object.keys(gitIdentityEnv(null)).length === 0);
 
 // ── what to start ─────────────────────────────────────────────────────
 

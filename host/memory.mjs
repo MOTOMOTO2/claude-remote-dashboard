@@ -61,6 +61,8 @@ export function jobSystemPrompt({ slug, isNew = false, owner = '', host = 'cloud
       + ' breaks. Never say something works unless you saw it work.',
     '- Commit as you go, with clear messages. Do not push, and do not change git remotes or'
       + ' credentials: the runner pushes when you finish.',
+    '- Commits are made in the account owner\'s name: never add "Co-Authored-By" trailers or'
+      + ' "Generated with" lines to commit messages or pull requests.',
     '',
     'Project memory (important):',
     '- CLAUDE.md at the repository root is how this project is remembered between sessions, by you'
